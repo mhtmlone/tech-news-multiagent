@@ -14,7 +14,7 @@ class LLMAnalyzer:
     
     def __init__(
         self, 
-        model_name: str = "gpt-4o-mini", 
+        model_name: str = "qwen/qwen3.5-27b", 
         api_key: Optional[str] = None,
         temperature: float = 0.7
     ):
@@ -27,6 +27,7 @@ class LLMAnalyzer:
         """
         self.llm = ChatOpenAI(
             model=model_name,
+            base_url="https://openrouter.ai/api/v1",
             api_key=api_key or os.getenv("OPENAI_API_KEY"),
             temperature=temperature
         )

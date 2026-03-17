@@ -215,6 +215,24 @@ black src/
 ruff check src/
 ```
 
+## Article Content Extraction
+
+The `NewsCollectorAgent` uses a multi-strategy approach to extract full article content:
+
+1. **Standard HTTP** — aiohttp with trafilatura, newspaper3k, readability-lxml, and BeautifulSoup fallbacks
+2. **Playwright headless browser** — Used as a fallback for sites protected by JavaScript challenges (e.g., **AWS WAF Bot Control** used by Ars Technica). The headless Chromium browser executes the WAF challenge JavaScript, obtains the required cookies, and then loads the actual page.
+
+### Known Limitations (KIV)
+
+The following sites use **DataDome** bot protection, which performs behavioral analysis and blocks all automated access including headless browsers. Content extraction from these sites is **not currently possible** without a paid DataDome bypass service or manual intervention:
+
+| Site | Protection | Status |
+|------|-----------|--------|
+| reuters.com | DataDome (HTTP 401, `x-datadome` header) | ❌ KIV — cannot bypass |
+| wsj.com | DataDome (HTTP 401, `x-datadome` header) | ❌ KIV — cannot bypass |
+
+Articles from these sources will fall back to using the RSS feed summary only (no full article content).
+
 ## Requirements
 
 - Python 3.10+
@@ -224,6 +242,7 @@ ruff check src/
 - aiohttp
 - BeautifulSoup4
 - feedparser
+- playwright (for AWS WAF bypass)
 
 ## License
 

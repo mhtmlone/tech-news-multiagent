@@ -1,6 +1,10 @@
 import typer
 from typing import Optional
 import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from .main import TechNewsMultiAgentSystem
 
