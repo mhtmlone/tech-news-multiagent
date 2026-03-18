@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from ..models.schemas import Technology, TechnologyStatus
 from ..memory.vector_store import VectorMemory
+from ..storage.sqlite_store import SQLiteStore
 from .base import BaseAgent
 
 
@@ -12,6 +13,47 @@ class MemoryManagerAgent(BaseAgent):
         super().__init__(name="MemoryManagerAgent", **kwargs)
         if not self.memory:
             self.memory = VectorMemory()
+        self.db = SQLiteStore()
+
+    def search_related_articles(self, query: str, limit: int = 20) -> list[dict]:
+        """Search the database for articles related to a technology or topic.
+        
+        Args:
+            query: Search query (technology name or topic)
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of matching articles with content
+        """
+        try:
+            articles = self.db.search_articles(query, limit=limit)
+            return articles
+        except Exception as e:
+            self.logger.error(f"Error searching articles for '{query}': {e}")
+            return []
+
+    def get_context_articles(self, tech_name: str, limit: int = 10) -> list[dict]:
+        """Get context articles from the database for a technology.
+        
+        Args:
+            tech_name: Name of the technology
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of articles with full content for context
+        """
+        try:
+            articles = self.db.get_articles_with_content(limit=limit)
+            # Filter to only include articles mentioning the technology
+            relevant = [
+                a for a in articles
+                if tech_name.lower() in a.get("title", "").lower()
+                or tech_name.lower() in a.get("content", "").lower()
+            ]
+            return relevant[:limit]
+        except Exception as e:
+            self.logger.error(f"Error getting context articles for '{tech_name}': {e}")
+            return []
 
     def _technology_to_memory_entry(self, tech: Technology) -> dict:
         return {
@@ -129,11 +171,29 @@ class MemoryManagerAgent(BaseAgent):
         new_stored_ids = await self.store_new_technologies(new_technologies)
         updated_stored_ids = await self.update_existing_technologies(updated_technologies)
 
+        # Optionally search database for additional context
+        search_db = input_data.get("search_database", False)
+        db_context = {}
+        if search_db:
+            try:
+                # Get context for new technologies
+                for tech in new_technologies:
+                    articles = self.get_context_articles(tech.name, limit=5)
+                    if articles:
+                        db_context[tech.name] = {
+                            "article_count": len(articles),
+                            "sources": list(set(a.get("source", "") for a in articles)),
+                        }
+                self.logger.info(f"Found database context for {len(db_context)} technologies")
+            except Exception as e:
+                self.logger.error(f"Error searching database for context: {e}")
+
         result = {
             "new_technologies_stored": len(new_stored_ids),
             "updated_technologies_stored": len(updated_stored_ids),
             "new_ids": new_stored_ids,
             "updated_ids": updated_stored_ids,
+            "database_context": db_context if search_db else {},
             "timestamp": datetime.now().isoformat(),
         }
 

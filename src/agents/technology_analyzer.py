@@ -1,10 +1,14 @@
 import re
 import uuid
+import logging
 from datetime import datetime
 from typing import Optional, Any
 
 from ..models.schemas import Technology, TechnologyStatus, TechnologyMention
+from ..storage.sqlite_store import SQLiteStore
 from .base import BaseAgent
+
+logger = logging.getLogger(__name__)
 
 
 TECH_CATEGORIES = {
@@ -134,10 +138,13 @@ TECH_CATEGORIES = {
 
 
 class TechnologyAnalyzerAgent(BaseAgent):
-    def __init__(self, **kwargs):
+    def __init__(self, sqlite_store: SQLiteStore = None, **kwargs):
         super().__init__(name="TechnologyAnalyzerAgent", **kwargs)
         self.categories = TECH_CATEGORIES
         self.patterns = self._build_patterns()
+        self.sqlite_store = sqlite_store or SQLiteStore()
+        
+        logger.info("TechnologyAnalyzerAgent initialized with SQLiteStore")
 
     def _build_patterns(self) -> dict[str, re.Pattern]:
         patterns = {}
@@ -145,6 +152,47 @@ class TechnologyAnalyzerAgent(BaseAgent):
             pattern_str = r"\b(" + "|".join(re.escape(kw) for kw in keywords) + r")\b"
             patterns[category] = re.compile(pattern_str, re.IGNORECASE)
         return patterns
+
+    def search_related_articles(self, query: str, limit: int = 20) -> list[dict]:
+        """Search for articles in the database related to a query.
+        
+        Args:
+            query: Search query (technology name or keyword)
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of article dictionaries with content
+        """
+        articles = self.sqlite_store.search_articles(query, limit=limit)
+        logger.debug(f"Found {len(articles)} articles for query: {query}")
+        return articles
+
+    def get_recent_articles_for_technology(self, tech_name: str, days: int = 30, limit: int = 50) -> list[dict]:
+        """Get recent articles mentioning a specific technology.
+        
+        Args:
+            tech_name: Technology name to search for
+            days: Number of days to look back
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of recent article dictionaries
+        """
+        # Get recent articles first
+        recent_articles = self.sqlite_store.get_recent_articles(days=days, limit=limit)
+        
+        # Filter for articles mentioning the technology
+        tech_lower = tech_name.lower()
+        matching_articles = [
+            article for article in recent_articles
+            if tech_lower in article.get('title', '').lower()
+            or tech_lower in article.get('content', '').lower()
+            or tech_lower in article.get('summary', '').lower()
+            or any(tech_lower in kw.lower() for kw in article.get('keywords', []))
+        ]
+        
+        logger.debug(f"Found {len(matching_articles)} recent articles for technology: {tech_name}")
+        return matching_articles
 
     def categorize_technology(self, text: str) -> str:
         for category, pattern in self.patterns.items():
@@ -328,6 +376,7 @@ class TechnologyAnalyzerAgent(BaseAgent):
     ) -> dict[str, list[Technology] | dict]:
         mentions_data = input_data.get("mentions", [])
         existing_techs = input_data.get("existing_technologies", [])
+        search_database = input_data.get("search_database", True)  # New option to search DB
 
         mentions = []
         for m in mentions_data:
@@ -335,6 +384,37 @@ class TechnologyAnalyzerAgent(BaseAgent):
                 mentions.append(TechnologyMention(**m))
             elif isinstance(m, TechnologyMention):
                 mentions.append(m)
+
+        # Also search the database for relevant articles if enabled
+        db_articles = []
+        if search_database:
+            # Get recent articles with content for analysis
+            db_articles = self.sqlite_store.get_articles_with_content(limit=100)
+            logger.info(f"Found {len(db_articles)} articles in database for analysis")
+            
+            # Convert database articles to mentions for analysis
+            for article in db_articles:
+                # Check if this article is already in mentions
+                article_url = article.get('url', '')
+                if any(m.url == article_url for m in mentions):
+                    continue
+                    
+                # Create a mention from the article
+                try:
+                    mention = TechnologyMention(
+                        source=article.get('source', 'Database'),
+                        url=article_url,
+                        title=article.get('title', ''),
+                        published_date=datetime.fromisoformat(article['published_date']) if article.get('published_date') else datetime.now(),
+                        summary=article.get('summary', '')[:500] if article.get('summary') else '',
+                        sentiment_score=article.get('sentiment_score', 0.0) or 0.0,
+                        relevance_score=article.get('relevance_score', 0.5) or 0.5,
+                    )
+                    mentions.append(mention)
+                except Exception as e:
+                    logger.warning(f"Failed to create mention from article: {e}")
+
+        logger.info(f"Processing {len(mentions)} total mentions ({len(mentions_data)} from input, {len(db_articles)} from database)")
 
         new_technologies = self.identify_new_technologies(mentions, existing_techs)
 
@@ -359,5 +439,6 @@ class TechnologyAnalyzerAgent(BaseAgent):
             "updated_technologies": updated_technologies,
             "promising_technologies": promising_technologies,
             "total_mentions_analyzed": len(mentions),
+            "database_articles_analyzed": len(db_articles),
             "analysis_timestamp": datetime.now(),
         }

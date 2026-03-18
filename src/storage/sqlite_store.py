@@ -653,7 +653,7 @@ class SQLiteStore:
             conn.close()
     
     def search_articles(self, query: str, limit: int = 20) -> list[dict]:
-        """Search articles by title or summary.
+        """Search articles by title, summary, content, or keywords.
         
         Args:
             query: Search query.
@@ -669,10 +669,13 @@ class SQLiteStore:
             search_pattern = f"%{query}%"
             cursor.execute("""
                 SELECT * FROM news_articles
-                WHERE title LIKE ? OR summary LIKE ?
+                WHERE title LIKE ? 
+                   OR summary LIKE ? 
+                   OR content LIKE ?
+                   OR keywords LIKE ?
                 ORDER BY published_date DESC
                 LIMIT ?
-            """, (search_pattern, search_pattern, limit))
+            """, (search_pattern, search_pattern, search_pattern, search_pattern, limit))
             
             articles = []
             for row in cursor.fetchall():
@@ -681,5 +684,202 @@ class SQLiteStore:
                 articles.append(article)
             
             return articles
+        finally:
+            conn.close()
+    
+    # =========================================================================
+    # URL Deduplication Methods
+    # =========================================================================
+    
+    def url_exists(self, url: str) -> bool:
+        """Check if a URL has already been collected.
+        
+        This method is used for URL deduplication to prevent collecting
+        the same article multiple times.
+        
+        Args:
+            url: The URL to check.
+            
+        Returns:
+            True if URL exists in database, False otherwise.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                "SELECT 1 FROM news_articles WHERE url = ? LIMIT 1",
+                (url,)
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
+    
+    def get_urls_batch(self, urls: list) -> set:
+        """Check which URLs from a batch already exist in the database.
+        
+        This is an efficient way to check multiple URLs at once for
+        deduplication purposes.
+        
+        Args:
+            urls: List of URLs to check.
+            
+        Returns:
+            Set of URLs that already exist in the database.
+        """
+        if not urls:
+            return set()
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            placeholders = ",".join("?" * len(urls))
+            cursor.execute(
+                f"SELECT url FROM news_articles WHERE url IN ({placeholders})",
+                urls
+            )
+            return {row["url"] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+    
+    def get_collected_urls_since(self, since_date: datetime) -> set:
+        """Get all URLs collected since a specific date.
+        
+        This can be used to get a snapshot of recently collected URLs
+        for deduplication or analysis purposes.
+        
+        Args:
+            since_date: The starting date.
+            
+        Returns:
+            Set of URLs collected since the specified date.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                "SELECT url FROM news_articles WHERE collected_date >= ?",
+                (since_date.isoformat(),)
+            )
+            return {row["url"] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+    
+    # =========================================================================
+    # Additional Search Methods
+    # =========================================================================
+    
+    def get_articles_by_source(self, source: str, limit: int = 50) -> list[dict]:
+        """Get articles from a specific source.
+        
+        Args:
+            source: Source name (e.g., 'TechCrunch', 'The Verge').
+            limit: Maximum number of results.
+            
+        Returns:
+            List of articles from the source.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT * FROM news_articles 
+                WHERE source = ?
+                ORDER BY published_date DESC
+                LIMIT ?
+            """, (source, limit))
+            
+            articles = []
+            for row in cursor.fetchall():
+                article = dict(row)
+                article["keywords"] = json.loads(article["keywords"] or "[]")
+                articles.append(article)
+            
+            return articles
+        finally:
+            conn.close()
+    
+    def get_articles_with_content(self, limit: int = 100) -> list[dict]:
+        """Get articles that have non-empty content.
+        
+        This is useful for agents that need to perform analysis on
+        full article content rather than just summaries.
+        
+        Args:
+            limit: Maximum number of results.
+            
+        Returns:
+            List of articles with content.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT * FROM news_articles 
+                WHERE content IS NOT NULL AND content != ''
+                ORDER BY published_date DESC
+                LIMIT ?
+            """, (limit,))
+            
+            articles = []
+            for row in cursor.fetchall():
+                article = dict(row)
+                article["keywords"] = json.loads(article["keywords"] or "[]")
+                articles.append(article)
+            
+            return articles
+        finally:
+            conn.close()
+    
+    def get_recent_articles(self, days: int = 7, limit: int = 100) -> list[dict]:
+        """Get articles from the last N days.
+        
+        Args:
+            days: Number of days to look back.
+            limit: Maximum number of results.
+            
+        Returns:
+            List of recent articles.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT * FROM news_articles 
+                WHERE published_date >= datetime('now', ?)
+                ORDER BY published_date DESC
+                LIMIT ?
+            """, (f'-{days} days', limit))
+            
+            articles = []
+            for row in cursor.fetchall():
+                article = dict(row)
+                article["keywords"] = json.loads(article["keywords"] or "[]")
+                articles.append(article)
+            
+            return articles
+        finally:
+            conn.close()
+    
+    def get_all_sources(self) -> list[str]:
+        """Get a list of all unique article sources.
+        
+        Returns:
+            List of unique source names.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT DISTINCT source FROM news_articles
+                ORDER BY source
+            """)
+            return [row["source"] for row in cursor.fetchall()]
         finally:
             conn.close()

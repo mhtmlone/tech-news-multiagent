@@ -3,6 +3,7 @@ from typing import Any
 
 from ..models.schemas import Technology, TechnologyStatus
 from ..memory.vector_store import VectorMemory
+from ..storage.sqlite_store import SQLiteStore
 from .base import BaseAgent
 
 
@@ -11,6 +12,7 @@ class DevelopmentTrackerAgent(BaseAgent):
         super().__init__(name="DevelopmentTrackerAgent", **kwargs)
         if not self.memory:
             self.memory = VectorMemory()
+        self.db = SQLiteStore()
         self.tracking_window_days = 30
         self.significant_mention_threshold = 5
         self.status_change_thresholds = {
@@ -18,6 +20,40 @@ class DevelopmentTrackerAgent(BaseAgent):
             "growing_to_mature": {"mentions": 50, "days": 30},
             "mature_to_declining": {"mentions": 5, "days": 30},
         }
+
+    def search_development_articles(self, tech_name: str, limit: int = 20) -> list[dict]:
+        """Search the database for articles related to a technology development.
+        
+        Args:
+            tech_name: Name of the technology to search for
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of matching articles with content
+        """
+        try:
+            articles = self.db.search_articles(tech_name, limit=limit)
+            return articles
+        except Exception as e:
+            self.logger.error(f"Error searching development articles for '{tech_name}': {e}")
+            return []
+
+    def get_recent_development_articles(self, days: int = 7, limit: int = 50) -> list[dict]:
+        """Get recent articles from the database for development tracking.
+        
+        Args:
+            days: Number of days to look back
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of recent articles
+        """
+        try:
+            articles = self.db.get_recent_articles(days=days, limit=limit)
+            return articles
+        except Exception as e:
+            self.logger.error(f"Error getting recent development articles: {e}")
+            return []
 
     async def analyze_technology_trajectory(
         self, tech_id: str, tech_data: dict
@@ -247,10 +283,30 @@ class DevelopmentTrackerAgent(BaseAgent):
 
         all_tracked = self.memory.get_all_technologies()
 
+        # Optionally search database for additional context
+        search_db = input_data.get("search_database", False)
+        db_articles = []
+        if search_db:
+            try:
+                db_articles = self.get_recent_development_articles(days=7, limit=50)
+                self.logger.info(f"Found {len(db_articles)} recent articles in database for development tracking")
+            except Exception as e:
+                self.logger.error(f"Error searching database for development articles: {e}")
+
         reports = []
         for tech_data in all_tracked:
             tech_id = tech_data["id"]
             report = await self.generate_development_report(tech_id, tech_data)
+            
+            # Enrich report with database articles if available
+            if db_articles and search_db:
+                tech_name = tech_data.get("name", "")
+                if tech_name:
+                    related_articles = [a for a in db_articles if tech_name.lower() in a.get("title", "").lower() or tech_name.lower() in a.get("content", "").lower()]
+                    if related_articles:
+                        report["database_articles"] = related_articles[:5]
+                        report["db_article_count"] = len(related_articles)
+            
             reports.append(report)
 
         promising = []
@@ -287,6 +343,7 @@ class DevelopmentTrackerAgent(BaseAgent):
             "status_changes_recommended": [
                 r for r in reports if r.get("recommended_status")
             ],
+            "database_articles_used": len(db_articles) if search_db else 0,
             "timestamp": datetime.now().isoformat(),
         }
 

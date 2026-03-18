@@ -9,6 +9,7 @@ from ..models.schemas import GeneratedReport, ReportSection
 from ..storage.sqlite_store import SQLiteStore
 from ..utils.llm_analyzer import LLMAnalyzer
 from ..utils.entity_extractor import EntityExtractor
+from ..config.llm_config import LLMConfig
 from .base import BaseAgent
 
 
@@ -41,7 +42,9 @@ class ReportGeneratorAgent(BaseAgent):
         
         if use_llm and not llm_analyzer:
             try:
-                self.llm_analyzer = LLMAnalyzer()
+                # Initialize LLM with configuration from LLMConfig
+                llm_kwargs = LLMConfig.create_llm_kwargs("report_generator")
+                self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
             except Exception as e:
                 print(f"Warning: Could not initialize LLM analyzer: {e}")
                 self.use_llm = False

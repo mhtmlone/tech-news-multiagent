@@ -16,21 +16,34 @@ class LLMAnalyzer:
         self, 
         model_name: str = "qwen/qwen3.5-27b", 
         api_key: Optional[str] = None,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None
     ):
         """Initialize the LLM analyzer.
         
         Args:
-            model_name: The OpenAI model to use.
+            model_name: The model to use (for backward compatibility).
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var).
             temperature: Temperature for LLM responses.
+            base_url: Base URL for API (for OpenRouter or custom endpoints).
+            model: Alternative parameter for model name (takes precedence over model_name).
         """
-        self.llm = ChatOpenAI(
-            model=model_name,
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key or os.getenv("OPENAI_API_KEY"),
-            temperature=temperature
-        )
+        # Use model parameter if provided, otherwise fall back to model_name
+        effective_model = model or model_name
+        
+        # Build ChatOpenAI kwargs
+        llm_kwargs = {
+            "model": effective_model,
+            "api_key": api_key or os.getenv("OPENAI_API_KEY"),
+            "temperature": temperature
+        }
+        
+        # Add base_url if provided
+        if base_url:
+            llm_kwargs["base_url"] = base_url
+        
+        self.llm = ChatOpenAI(**llm_kwargs)
         self.output_parser = StrOutputParser()
     
     def _format_articles_for_prompt(self, articles: list[dict]) -> str:
@@ -455,3 +468,66 @@ Category:""")
         
         category = response.strip()
         return category if category in categories else "General Technology"
+    
+    async def is_technology_related(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
+        """Determine if an article is technology-related using LLM.
+        
+        This method uses the LLM to analyze the article title (and optionally summary)
+        to determine if it's related to technology topics. It returns a boolean
+        indicating whether it's tech-related and a list of technology topics found.
+        
+        Args:
+            title: The article title to analyze.
+            summary: Optional article summary for additional context.
+            
+        Returns:
+            Tuple of (is_tech_related: bool, tech_topics: list[str])
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a technology news classifier. Analyze the given article title and summary 
+            to determine if it is related to technology topics.
+            
+            Technology topics include but are not limited to:
+            - Artificial Intelligence, Machine Learning, Deep Learning, LLMs
+            - Software development, programming languages, frameworks
+            - Hardware, semiconductors, chips, processors
+            - Cloud computing, infrastructure, DevOps
+            - Cybersecurity, privacy, encryption
+            - Mobile devices, smartphones, tablets
+            - Internet, web technologies, APIs
+            - Data science, analytics, big data
+            - Blockchain, cryptocurrency, Web3
+            - Robotics, automation, autonomous systems
+            - Biotechnology, medical technology
+            - Energy technology, clean tech
+            - Space technology, satellites
+            - Telecommunications, 5G/6G
+            - AR/VR, metaverse
+            - IoT, smart devices
+            - Electric vehicles, autonomous vehicles
+            
+            Return a JSON object with these keys:
+            - is_technology_related (boolean): true if the article is about technology
+            - tech_topics (list of strings): technology topics mentioned in the article
+            - confidence (float 0-1): confidence level of the classification"""),
+            ("user", """Article Title: {title}
+Article Summary: {summary}
+
+Analyze and return JSON:""")
+        ])
+        
+        chain = prompt | self.llm | self.output_parser
+        response = await chain.ainvoke({
+            "title": title,
+            "summary": summary[:500] if summary else "N/A"
+        })
+        
+        result = self._parse_json_response(response)
+        is_tech = result.get("is_technology_related", False)
+        topics = result.get("tech_topics", [])
+        
+        # Ensure is_tech is a boolean
+        if isinstance(is_tech, str):
+            is_tech = is_tech.lower() in ("true", "yes", "1")
+        
+        return bool(is_tech), topics

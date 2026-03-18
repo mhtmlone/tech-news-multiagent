@@ -13,10 +13,14 @@ logger = logging.getLogger(__name__)
 from ..models.schemas import TechnologyMention
 from ..storage.sqlite_store import SQLiteStore
 from ..utils.entity_extractor import EntityExtractor
+from ..config.rss_config import RSSConfig
+from ..config.llm_config import LLMConfig
+from ..utils.failure_logger import FailureLogger
 from .base import BaseAgent
 
 
-TECH_NEWS_SOURCES = [
+# Default fallback sources (used when .env is not configured)
+DEFAULT_TECH_NEWS_SOURCES = [
     "https://techcrunch.com/feed/",
     "https://www.theverge.com/rss/index.xml",
     "https://arstechnica.com/feed/",
@@ -26,7 +30,8 @@ TECH_NEWS_SOURCES = [
     "https://thenextweb.com/feed/",
 ]
 
-TECH_KEYWORDS = [
+# Default fallback keywords (used when .env is not configured)
+DEFAULT_TECH_KEYWORDS = [
     "AI",
     "artificial intelligence",
     "machine learning",
@@ -104,24 +109,52 @@ TECH_KEYWORDS = [
 
 class NewsCollectorAgent(BaseAgent):
     def __init__(
-        self, 
+        self,
         sqlite_store: SQLiteStore = None,
         extract_entities: bool = True,
+        rss_config: RSSConfig = None,
         **kwargs
     ):
         super().__init__(name="NewsCollectorAgent", **kwargs)
-        self.sources = TECH_NEWS_SOURCES
-        self.keywords = TECH_KEYWORDS
+        
+        # Initialize RSS configuration (from .env or defaults)
+        self.rss_config = rss_config or RSSConfig()
+        self.sources = self.rss_config.get_sources()
+        self.keywords = self.rss_config.get_keywords()
+        
+        # Initialize failure logger if enabled
+        self.failure_logger = FailureLogger() if self.rss_config.is_failure_logging_enabled() else None
+        
         self.session: Optional[aiohttp.ClientSession] = None
         self.sqlite_store = sqlite_store or SQLiteStore()
         self.extract_entities = extract_entities
         self.entity_extractor = EntityExtractor() if extract_entities else None
+        
+        # Initialize LLM analyzer for technology classification if enabled
+        self.llm_analyzer = None
+        if LLMConfig.is_enabled():
+            from ..utils.llm_analyzer import LLMAnalyzer
+            llm_kwargs = LLMConfig.create_llm_kwargs("news_collector")
+            self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
+            logger.info(
+                f"LLM-based technology classification enabled: "
+                f"provider={LLMConfig.get_provider()}, "
+                f"model={LLMConfig.get_model('news_collector')}"
+            )
+        
+        # Log configuration on startup
+        logger.info(
+            f"NewsCollectorAgent initialized with {len(self.sources)} sources, "
+            f"{len(self.keywords)} keywords, "
+            f"failure logging: {'enabled' if self.failure_logger else 'disabled'}"
+        )
 
     async def _ensure_session(self):
         if self.session is None or self.session.closed:
+            timeout = self.rss_config.get_timeout()
             self.session = aiohttp.ClientSession(
                 headers={"User-Agent": "TechNewsAnalyzer/1.0"},
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             )
 
     async def close(self):
@@ -158,10 +191,18 @@ class NewsCollectorAgent(BaseAgent):
             
             if content:
                 content = re.sub(r'\s+', ' ', content).strip()
-                return content[:10000]
+                return content
         
         # If hard-blocked (e.g. DataDome), skip Playwright - it won't help
         if html_content == self._HARD_BLOCKED:
+            # Log the hard block failure
+            if self.failure_logger:
+                self.failure_logger.log_content_extraction_failure(
+                    url=url,
+                    error_type="hard_block",
+                    error_message="DataDome or similar bot protection blocked access",
+                    details={"block_type": "datadome"}
+                )
             return ""
         
         # Fallback: use Playwright headless browser for JS-challenge protected sites
@@ -178,7 +219,16 @@ class NewsCollectorAgent(BaseAgent):
             
             if content:
                 content = re.sub(r'\s+', ' ', content).strip()
-                return content[:10000]
+                return content
+        
+        # Log extraction failure if all methods failed
+        if self.failure_logger:
+            self.failure_logger.log_content_extraction_failure(
+                url=url,
+                error_type="extraction_failed",
+                error_message="All content extraction methods failed",
+                details={"tried_methods": ["trafilatura", "newspaper3k", "readability", "beautifulsoup", "playwright"]}
+            )
         
         return ""
 
@@ -222,10 +272,50 @@ class NewsCollectorAgent(BaseAgent):
                     # Other 401 errors
                     logger.debug(f"HTTP 401 for {url}, skipping")
                     return ""
+                elif response.status == 403:
+                    # Forbidden - often due to bot detection
+                    if self.failure_logger:
+                        self.failure_logger.log_content_extraction_failure(
+                            url=url,
+                            error_type="forbidden",
+                            error_message=f"HTTP 403 Forbidden - possible bot detection",
+                            details={"status_code": 403}
+                        )
+                    logger.debug(f"HTTP 403 for {url}, skipping")
+                    return ""
+                elif response.status == 429:
+                    # Rate limited
+                    if self.failure_logger:
+                        self.failure_logger.log_rate_limit(
+                            url=url,
+                            retry_after=response.headers.get('Retry-After')
+                        )
+                    logger.debug(f"HTTP 429 rate limited for {url}, skipping")
+                    return ""
                 else:
                     logger.debug(f"HTTP {response.status} for {url}, skipping")
+        except asyncio.TimeoutError:
+            if self.failure_logger:
+                self.failure_logger.log_network_timeout(url=url, operation="fetch_html")
+            logger.warning(f"Timeout fetching HTML from {url}")
+        except aiohttp.ClientError as e:
+            if self.failure_logger:
+                self.failure_logger.log_content_extraction_failure(
+                    url=url,
+                    error_type="network_error",
+                    error_message=str(e),
+                    details={"exception_type": type(e).__name__}
+                )
+            logger.warning(f"Network error fetching HTML from {url}: {e}")
         except Exception as e:
-            print(f"Error fetching HTML from {url}: {e}")
+            if self.failure_logger:
+                self.failure_logger.log_content_extraction_failure(
+                    url=url,
+                    error_type="unexpected_error",
+                    error_message=str(e),
+                    details={"exception_type": type(e).__name__}
+                )
+            logger.error(f"Unexpected error fetching HTML from {url}: {e}")
         return ""
 
     async def _fetch_html_with_playwright(self, url: str) -> str:
@@ -294,6 +384,108 @@ class NewsCollectorAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"Playwright extraction failed for {url}: {e}")
         return ""
+
+    async def fetch_36kr_news_with_playwright(self, max_items: int = 20) -> list[dict]:
+        """Fetch news from 36kr using Playwright browser automation.
+        
+        This is a fallback method for when the RSS feed is unavailable or blocked.
+        36kr.com uses CAPTCHA protection (ByteDance TTGCaptcha) that blocks direct
+        HTTP requests, but can be bypassed with a headless browser.
+        
+        Args:
+            max_items: Maximum number of news items to fetch (default 20)
+            
+        Returns:
+            List of news entry dictionaries with title, link, summary, published, source
+        """
+        entries = []
+        
+        try:
+            from playwright.async_api import async_playwright
+            
+            logger.info("Fetching 36kr news using Playwright browser automation...")
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent=(
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                        'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        'Chrome/120.0.0.0 Safari/537.36'
+                    ),
+                    viewport={'width': 1920, 'height': 1080},
+                    java_script_enabled=True,
+                )
+                page = await context.new_page()
+                
+                try:
+                    # Navigate to 36kr newsflashes page
+                    await page.goto(
+                        "https://36kr.com/newsflashes",
+                        wait_until='networkidle',
+                        timeout=60000
+                    )
+                    
+                    # Wait for content to load
+                    await page.wait_for_timeout(3000)
+                    
+                    # Extract news items using the newsflash-item selector
+                    items = await page.query_selector_all('.newsflash-item')
+                    
+                    for i, item in enumerate(items[:max_items]):
+                        try:
+                            # Extract title and link
+                            title_elem = await item.query_selector('.newsflash-time a')
+                            content_elem = await item.query_selector('.newsflash-content')
+                            time_elem = await item.query_selector('.newsflash-time')
+                            
+                            title = ""
+                            link = ""
+                            summary = ""
+                            published = datetime.now()
+                            
+                            if title_elem:
+                                title = await title_elem.inner_text()
+                                href = await title_elem.get_attribute('href')
+                                if href:
+                                    # Handle relative URLs
+                                    if href.startswith('/'):
+                                        link = f"https://36kr.com{href}"
+                                    else:
+                                        link = href
+                            
+                            if content_elem:
+                                summary = await content_elem.inner_text()
+                                # Use summary as title if no title found
+                                if not title:
+                                    title = summary[:100] + "..." if len(summary) > 100 else summary
+                            
+                            if title and link:
+                                entries.append({
+                                    "title": title.strip(),
+                                    "link": link.strip(),
+                                    "summary": summary.strip(),
+                                    "published": published,
+                                    "source": "36kr",
+                                })
+                                
+                        except Exception as e:
+                            logger.debug(f"Error extracting 36kr item {i}: {e}")
+                            continue
+                    
+                    logger.info(f"Successfully extracted {len(entries)} news items from 36kr via Playwright")
+                    
+                except Exception as e:
+                    logger.warning(f"Error navigating 36kr page: {e}")
+                finally:
+                    await browser.close()
+                    
+        except ImportError:
+            logger.warning("Playwright not installed, cannot fetch 36kr news via browser")
+        except Exception as e:
+            logger.error(f"Failed to fetch 36kr news with Playwright: {e}")
+            
+        return entries
 
     def _extract_with_trafilatura(self, url: str, html_content: str) -> str:
         """Extract content using Trafilatura library.
@@ -561,12 +753,24 @@ class NewsCollectorAgent(BaseAgent):
     async def fetch_feed(self, url: str) -> list[dict]:
         await self._ensure_session()
         entries = []
+        is_36kr_feed = "36kr" in url.lower()
 
         try:
             async with self.session.get(url) as response:
                 if response.status == 200:
                     feed_content = await response.text()
                     feed = feedparser.parse(feed_content)
+                    
+                    # Check for feed parsing errors
+                    if feed.bozo and self.failure_logger:
+                        # feedparser sets bozo=1 when there's a parsing error
+                        bozo_exception = getattr(feed, 'bozo_exception', None)
+                        self.failure_logger.log_parse_failure(
+                            url=url,
+                            error_message=str(bozo_exception) if bozo_exception else "Unknown parse error",
+                            details={"bozo": True, "exception_type": type(bozo_exception).__name__ if bozo_exception else None}
+                        )
+                        logger.warning(f"RSS feed parsing error for {url}: {bozo_exception}")
 
                     for entry in feed.entries[:20]:
                         published = None
@@ -592,8 +796,67 @@ class NewsCollectorAgent(BaseAgent):
                                 "source": feed.feed.get("title", url),
                             }
                         )
+                else:
+                    # Log non-200 status codes
+                    if self.failure_logger:
+                        self.failure_logger.log_rss_fetch_failure(
+                            url=url,
+                            error_message=f"HTTP {response.status}",
+                            details={"status_code": response.status}
+                        )
+                    logger.warning(f"Failed to fetch RSS feed {url}: HTTP {response.status}")
+                    
+                    # Fallback to Playwright for 36kr when RSS fails
+                    if is_36kr_feed:
+                        logger.info(f"Attempting Playwright fallback for 36kr feed...")
+                        playwright_entries = await self.fetch_36kr_news_with_playwright()
+                        if playwright_entries:
+                            logger.info(f"Playwright fallback successful, got {len(playwright_entries)} entries")
+                            return playwright_entries
+                    
+        except asyncio.TimeoutError:
+            if self.failure_logger:
+                self.failure_logger.log_network_timeout(url=url, operation="fetch_feed")
+            logger.warning(f"Timeout fetching RSS feed {url}")
+            
+            # Fallback to Playwright for 36kr on timeout
+            if is_36kr_feed:
+                logger.info(f"Attempting Playwright fallback for 36kr after timeout...")
+                playwright_entries = await self.fetch_36kr_news_with_playwright()
+                if playwright_entries:
+                    return playwright_entries
+                    
+        except aiohttp.ClientError as e:
+            if self.failure_logger:
+                self.failure_logger.log_rss_fetch_failure(
+                    url=url,
+                    error_message=str(e),
+                    details={"exception_type": type(e).__name__}
+                )
+            logger.warning(f"Network error fetching RSS feed {url}: {e}")
+            
+            # Fallback to Playwright for 36kr on network error
+            if is_36kr_feed:
+                logger.info(f"Attempting Playwright fallback for 36kr after network error...")
+                playwright_entries = await self.fetch_36kr_news_with_playwright()
+                if playwright_entries:
+                    return playwright_entries
+                    
         except Exception as e:
-            print(f"Error fetching feed {url}: {e}")
+            if self.failure_logger:
+                self.failure_logger.log_rss_fetch_failure(
+                    url=url,
+                    error_message=str(e),
+                    details={"exception_type": type(e).__name__}
+                )
+            logger.error(f"Unexpected error fetching RSS feed {url}: {e}")
+            
+            # Fallback to Playwright for 36kr on unexpected error
+            if is_36kr_feed:
+                logger.info(f"Attempting Playwright fallback for 36kr after unexpected error...")
+                playwright_entries = await self.fetch_36kr_news_with_playwright()
+                if playwright_entries:
+                    return playwright_entries
 
         return entries
 
@@ -610,7 +873,66 @@ class NewsCollectorAgent(BaseAgent):
 
         return all_entries
 
+    def filter_new_entries(self, entries: list[dict]) -> list[dict]:
+        """Filter out entries with URLs that have already been collected.
+        
+        Uses batch URL checking against the SQLite database for efficiency.
+        Logs duplicate URLs if failure logging is enabled.
+        
+        Args:
+            entries: List of entry dictionaries with 'link' keys
+            
+        Returns:
+            List of entries with new (not previously collected) URLs
+        """
+        if not entries:
+            return []
+        
+        # Extract all URLs from entries
+        urls = [entry.get("link") for entry in entries if entry.get("link")]
+        
+        if not urls:
+            return entries
+        
+        # Batch check which URLs already exist in the database
+        existing_urls = self.sqlite_store.get_urls_batch(urls)
+        
+        # Filter entries to only those with new URLs
+        new_entries = []
+        duplicate_count = 0
+        
+        for entry in entries:
+            url = entry.get("link")
+            if url and url in existing_urls:
+                duplicate_count += 1
+                # Log the duplicate
+                if self.failure_logger:
+                    self.failure_logger.log_url_duplicate(
+                        url=url,
+                        title=entry.get("title", ""),
+                        source=entry.get("source", "")
+                    )
+                logger.debug(f"Skipping duplicate URL: {url}")
+            else:
+                new_entries.append(entry)
+        
+        if duplicate_count > 0:
+            logger.info(f"Filtered out {duplicate_count} duplicate URLs, {len(new_entries)} new entries remaining")
+        
+        return new_entries
+
     def is_technology_related(self, text: str) -> tuple[bool, list[str]]:
+        """Check if text is technology-related using keyword matching.
+        
+        This is the synchronous keyword-based method. For LLM-based classification,
+        use is_technology_related_async() instead.
+        
+        Args:
+            text: Text to analyze for technology keywords.
+            
+        Returns:
+            Tuple of (is_tech_related: bool, matched_keywords: list[str])
+        """
         text_lower = text.lower()
         matched_keywords = []
 
@@ -619,6 +941,34 @@ class NewsCollectorAgent(BaseAgent):
                 matched_keywords.append(keyword)
 
         return len(matched_keywords) > 0, matched_keywords
+    
+    async def is_technology_related_async(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
+        """Check if an article is technology-related using LLM or keyword matching.
+        
+        If LLM classification is enabled (via RSS_LLM_PROVIDER), uses the LLM
+        to analyze the article title and summary. Otherwise, falls back to
+        keyword-based matching.
+        
+        Args:
+            title: Article title to analyze.
+            summary: Optional article summary for additional context.
+            
+        Returns:
+            Tuple of (is_tech_related: bool, tech_topics: list[str])
+        """
+        # Use LLM if available and configured
+        if self.llm_analyzer is not None:
+            try:
+                is_tech, topics = await self.llm_analyzer.is_technology_related(title, summary)
+                logger.debug(f"LLM classification for '{title[:50]}...': is_tech={is_tech}, topics={topics}")
+                return is_tech, topics
+            except Exception as e:
+                logger.warning(f"LLM classification failed, falling back to keywords: {e}")
+                # Fall through to keyword-based matching
+        
+        # Fallback to keyword-based matching
+        combined_text = f"{title} {summary}"
+        return self.is_technology_related(combined_text)
 
     def calculate_relevance(self, text: str, matched_keywords: list[str]) -> float:
         if not matched_keywords:
@@ -698,7 +1048,13 @@ class NewsCollectorAgent(BaseAgent):
 
         cutoff_date = datetime.now() - timedelta(days=max_age_days)
 
+        # Fetch all RSS feed entries
         entries = await self.fetch_all_feeds()
+        logger.info(f"Fetched {len(entries)} total entries from {len(self.sources)} sources")
+        
+        # Filter out entries with URLs that have already been collected
+        entries = self.filter_new_entries(entries)
+        logger.info(f"Processing {len(entries)} new entries after deduplication")
 
         technology_mentions = []
         stored_article_ids = []

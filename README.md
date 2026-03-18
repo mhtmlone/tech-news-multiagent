@@ -45,6 +45,45 @@ cp .env.example .env
 
 2. Add your API keys if using LLM-based features (optional for basic functionality)
 
+### RSS Feed Configuration
+
+The system supports configurable RSS feed sources via environment variables. Edit your `.env` file:
+
+```bash
+# RSS feed sources (comma-separated URLs)
+RSS_SOURCES=https://techcrunch.com/feed/,https://www.theverge.com/rss/index.xml,https://arstechnica.com/feed/
+
+# Keywords for filtering articles (comma-separated)
+RSS_KEYWORDS=AI,machine learning,blockchain,quantum computing,cybersecurity
+
+# Maximum content length to extract per article (characters)
+RSS_CONTENT_MAX_LENGTH=10000
+
+# Timeout for HTTP requests (seconds)
+RSS_CONTENT_TIMEOUT=30
+
+# Enable failure logging
+RSS_LOG_FAILURES=true
+
+# Log file path for RSS failures
+RSS_LOG_FILE=./logs/rss_failures.log
+```
+
+### Failure Logging
+
+When `RSS_LOG_FAILURES=true`, all RSS collection failures are logged to the specified log file. This includes:
+- RSS feed fetch failures
+- Content extraction failures
+- Parse failures
+- Network timeouts
+- Rate limit errors
+
+Log entries include timestamp, error type, URL, and error details for debugging.
+
+### URL Deduplication
+
+The system automatically prevents duplicate article collection by tracking URLs in the SQLite database. Articles that have already been collected will be skipped during subsequent collection runs.
+
 ## Usage
 
 ### Run Complete Analysis
@@ -185,10 +224,19 @@ asyncio.run(main())
 
 ## Data Storage
 
-All technology data is stored locally in ChromaDB:
+The system uses two storage backends:
+
+### SQLite Database
+- `tech_news.db`: Articles with full content, metadata, and search capabilities
+- URL deduplication tracking
+- Full-text search across article titles and content
+- Source-based article filtering
+
+### ChromaDB (Vector Store)
 - `memory_db/technologies`: Technology metadata
 - `memory_db/developments`: Development timeline
 - `memory_db/news_mentions`: News article references
+- Semantic search capabilities
 
 ## CLI Commands
 

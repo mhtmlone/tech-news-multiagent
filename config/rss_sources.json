@@ -1,0 +1,46 @@
+{
+  "sources": [
+    {
+      "url": "https://techcrunch.com/feed/",
+      "name": "TechCrunch",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://www.theverge.com/rss/index.xml",
+      "name": "The Verge",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://arstechnica.com/feed/",
+      "name": "Ars Technica",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://www.wired.com/feed/rss",
+      "name": "Wired",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://news.ycombinator.com/rss",
+      "name": "Hacker News",
+      "category": "community"
+    },
+    {
+      "url": "https://www.zdnet.com/news/rss/",
+      "name": "ZDNet",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://thenextweb.com/feed/",
+      "name": "The Next Web",
+      "category": "tech_news"
+    },
+    {
+      "url": "https://rsshub.rssforever.com/36kr/newsflashes",
+      "name": "36kr",
+      "category": "tech_news",
+      "original_url": "https://36kr.com/feed",
+      "note": "Using RSSHub proxy because 36kr.com/feed is protected by CAPTCHA"
+    }
+  ]
+}
