@@ -13,14 +13,14 @@ from pathlib import Path
 
 class FailureLogger:
     """File-based failure logging for RSS feed collection.
-    
+
     This class provides a simple, lightweight approach to logging failures
     without database overhead. All failures are written to a dedicated log file
     with structured formatting for easy debugging and monitoring.
-    
+
     Log Format:
         TIMESTAMP - LEVEL - FAILURE_TYPE | key=value | key=value ...
-    
+
     Example:
         >>> logger = FailureLogger("./logs/rss_failures.log")
         >>> logger.log_rss_fetch_failure(
@@ -29,24 +29,24 @@ class FailureLogger:
         ...     http_status=None
         ... )
     """
-    
+
     def __init__(self, log_file: str = "./logs/rss_failures.log"):
         """Initialize the failure logger.
-        
+
         Args:
             log_file: Path to the log file. Parent directories will be created
                 automatically if they don't exist.
         """
         self.log_file = Path(log_file)
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Setup file logger
         self.logger = logging.getLogger("rss_failures")
         self.logger.setLevel(logging.WARNING)
-        
+
         # Remove existing handlers to avoid duplicates
         self.logger.handlers = []
-        
+
         # File handler for persistent logging
         file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
         file_handler.setFormatter(logging.Formatter(
@@ -54,7 +54,7 @@ class FailureLogger:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         self.logger.addHandler(file_handler)
-        
+
         # Console handler for immediate feedback
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter(
@@ -62,84 +62,95 @@ class FailureLogger:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         self.logger.addHandler(console_handler)
-    
+
     def log_rss_fetch_failure(
         self,
-        source_url: str,
-        error: Exception,
-        http_status: Optional[int] = None
+        url: str,
+        error_message: str,
+        details: Optional[dict] = None
     ):
         """Log RSS feed fetch failure.
-        
+
         This logs failures when attempting to fetch an RSS feed URL,
         such as network errors, timeouts, or HTTP errors.
-        
+
         Args:
-            source_url: The RSS feed URL that failed to fetch.
-            error: The exception that occurred.
-            http_status: HTTP status code if available (e.g., 403, 500).
+            url: The RSS feed URL that failed to fetch.
+            error_message: Human-readable error message.
+            details: Optional dictionary with additional context (e.g., status_code, exception_type).
         """
-        status_str = str(http_status) if http_status else "N/A"
+        details_str = ""
+        if details:
+            details_parts = [f"{k}={v}" for k,
+                             v in details.items() if v is not None]
+            details_str = " | " + \
+                " | ".join(details_parts) if details_parts else ""
+
         self.logger.warning(
-            f"RSS_FETCH_FAILURE | source={source_url} | "
-            f"status={status_str} | error={self._format_error(error)}"
+            f"RSS_FETCH_FAILURE | url={url} | "
+            f"error={error_message}{details_str}"
         )
-    
+
     def log_content_extraction_failure(
         self,
-        article_url: str,
-        article_title: str,
-        source: str,
-        extraction_methods_tried: Optional[List[str]] = None
+        url: str,
+        error_type: str,
+        error_message: str,
+        details: Optional[dict] = None
     ):
         """Log article content extraction failure.
-        
-        This logs failures when all content extraction methods fail
-        to extract meaningful content from an article URL.
-        
+
+        This logs failures when content extraction fails for any reason,
+        including network errors, bot detection, or extraction method failures.
+
         Args:
-            article_url: The article URL that failed extraction.
-            article_title: The title of the article (truncated if too long).
-            source: The RSS source where the article was found.
-            extraction_methods_tried: List of extraction methods attempted.
+            url: The URL that failed extraction.
+            error_type: Type of error (e.g., "hard_block", "extraction_failed",
+                        "forbidden", "network_error", "unexpected_error").
+            error_message: Human-readable error message.
+            details: Optional dictionary with additional context.
         """
-        # Truncate title if too long
-        title_display = article_title[:50] + "..." if len(article_title) > 50 else article_title
-        methods_str = ", ".join(extraction_methods_tried) if extraction_methods_tried else "all methods"
-        
+        details_str = ""
+        if details:
+            # Format details as key=value pairs
+            details_parts = [f"{k}={v}" for k,
+                             v in details.items() if v is not None]
+            details_str = " | " + \
+                " | ".join(details_parts) if details_parts else ""
+
         self.logger.warning(
-            f"CONTENT_EXTRACTION_FAILURE | url={article_url} | "
-            f"title={title_display} | source={source} | methods_tried={methods_str}"
+            f"CONTENT_EXTRACTION_FAILURE | url={url} | "
+            f"error_type={error_type} | error_message={error_message}{details_str}"
         )
-    
+
     def log_parse_failure(
         self,
-        source_url: str,
-        error: Exception,
-        raw_content_sample: Optional[str] = None
+        url: str,
+        error_message: str,
+        details: Optional[dict] = None
     ):
         """Log RSS feed parsing failure.
-        
+
         This logs failures when an RSS feed cannot be parsed, such as
         malformed XML or encoding issues.
-        
+
         Args:
-            source_url: The RSS feed URL that failed to parse.
-            error: The exception that occurred during parsing.
-            raw_content_sample: Optional sample of the raw content for debugging.
+            url: The RSS feed URL that failed to parse.
+            error_message: Human-readable error message.
+            details: Optional dictionary with additional context (e.g., bozo, exception_type).
         """
-        message = (
-            f"RSS_PARSE_FAILURE | source={source_url} | "
-            f"error={self._format_error(error)}"
+        details_str = ""
+        if details:
+            details_parts = [f"{k}={v}" for k,
+                             v in details.items() if v is not None]
+            details_str = " | " + \
+                " | ".join(details_parts) if details_parts else ""
+
+        self.logger.warning(
+            f"RSS_PARSE_FAILURE | url={url} | "
+            f"error={error_message}{details_str}"
         )
-        
-        if raw_content_sample:
-            # Include first 200 chars of raw content for debugging
-            sample = raw_content_sample[:200].replace('\n', ' ')
-            message += f" | content_sample={sample}..."
-        
-        self.logger.warning(message)
-    
+
     def log_keyword_filter_failure(
         self,
         source_url: str,
@@ -147,10 +158,10 @@ class FailureLogger:
         filtered_count: int
     ):
         """Log when keyword filtering results in no articles.
-        
+
         This is an informational log when a feed is successfully fetched
         but no articles match the configured keywords.
-        
+
         Args:
             source_url: The RSS feed URL.
             entries_count: Total number of entries in the feed.
@@ -162,7 +173,7 @@ class FailureLogger:
                 f"total_entries={entries_count} | filtered_count={filtered_count} | "
                 f"note='No articles matched keywords'"
             )
-    
+
     def log_url_duplicate(
         self,
         url: str,
@@ -170,10 +181,10 @@ class FailureLogger:
         title: Optional[str] = None
     ):
         """Log when a duplicate URL is detected.
-        
+
         This logs when an article URL has already been collected
         and is skipped.
-        
+
         Args:
             url: The duplicate article URL.
             source: The RSS source where the article was found.
@@ -184,78 +195,75 @@ class FailureLogger:
             # Truncate title if too long
             title_display = title[:50] + "..." if len(title) > 50 else title
             title_str = f" | title={title_display}"
-        
+
         self.logger.info(
             f"URL_DUPLICATE | url={url} | source={source}{title_str} | action='skipped'"
         )
-    
+
     def log_network_timeout(
         self,
         url: str,
-        timeout_seconds: int,
         operation: str = "fetch"
     ):
         """Log network timeout errors.
-        
+
         Args:
             url: The URL that timed out.
-            timeout_seconds: The timeout duration in seconds.
             operation: The operation that timed out (fetch, extract, etc.).
         """
         self.logger.warning(
-            f"NETWORK_TIMEOUT | url={url} | operation={operation} | "
-            f"timeout={timeout_seconds}s"
+            f"NETWORK_TIMEOUT | url={url} | operation={operation}"
         )
-    
+
     def log_rate_limit(
         self,
-        source_url: str,
-        retry_after: Optional[int] = None
+        url: str,
+        retry_after: Optional[str] = None
     ):
         """Log rate limiting errors.
-        
+
         Args:
-            source_url: The URL that was rate-limited.
+            url: The URL that was rate-limited.
             retry_after: Seconds to wait before retrying (if provided).
         """
         retry_str = f"{retry_after}s" if retry_after else "unknown"
         self.logger.warning(
-            f"RATE_LIMIT | source={source_url} | retry_after={retry_str}"
+            f"RATE_LIMIT | url={url} | retry_after={retry_str}"
         )
-    
+
     def _format_error(self, error: Exception) -> str:
         """Format an exception for logging.
-        
+
         Args:
             error: The exception to format.
-            
+
         Returns:
             Formatted error string.
         """
         error_type = type(error).__name__
         error_msg = str(error).replace('\n', ' ')[:200]
         return f"{error_type}: {error_msg}"
-    
+
     def get_log_file_path(self) -> Path:
         """Get the path to the log file.
-        
+
         Returns:
             Path object for the log file.
         """
         return self.log_file
-    
+
     def read_recent_failures(self, lines: int = 100) -> List[str]:
         """Read recent failures from the log file.
-        
+
         Args:
             lines: Number of lines to read from the end of the file.
-            
+
         Returns:
             List of log lines, most recent last.
         """
         if not self.log_file.exists():
             return []
-        
+
         try:
             with open(self.log_file, 'r', encoding='utf-8') as f:
                 all_lines = f.readlines()

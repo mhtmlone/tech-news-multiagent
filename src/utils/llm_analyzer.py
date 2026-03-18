@@ -11,17 +11,17 @@ from langchain_core.output_parsers import StrOutputParser
 
 class LLMAnalyzer:
     """LLM-powered analyzer for news content and reports."""
-    
+
     def __init__(
-        self, 
-        model_name: str = "qwen/qwen3.5-27b", 
+        self,
+        model_name: str = "qwen/qwen3.5-27b",
         api_key: Optional[str] = None,
         temperature: float = 0.7,
         base_url: Optional[str] = None,
         model: Optional[str] = None
     ):
         """Initialize the LLM analyzer.
-        
+
         Args:
             model_name: The model to use (for backward compatibility).
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var).
@@ -31,27 +31,27 @@ class LLMAnalyzer:
         """
         # Use model parameter if provided, otherwise fall back to model_name
         effective_model = model or model_name
-        
+
         # Build ChatOpenAI kwargs
         llm_kwargs = {
             "model": effective_model,
             "api_key": api_key or os.getenv("OPENAI_API_KEY"),
             "temperature": temperature
         }
-        
+
         # Add base_url if provided
         if base_url:
             llm_kwargs["base_url"] = base_url
-        
+
         self.llm = ChatOpenAI(**llm_kwargs)
         self.output_parser = StrOutputParser()
-    
+
     def _format_articles_for_prompt(self, articles: list[dict]) -> str:
         """Format articles for inclusion in prompts.
-        
+
         Args:
             articles: List of article dictionaries.
-            
+
         Returns:
             Formatted string for prompts.
         """
@@ -61,20 +61,20 @@ class LLMAnalyzer:
             content = article.get('content', '') or article.get('summary', '')
             # Truncate to reasonable length for prompts (500 chars for better context)
             content_preview = content[:500] if content else 'N/A'
-            
+
             formatted.append(
                 f"{i}. {article.get('title', 'N/A')}\n"
                 f"   Source: {article.get('source', 'N/A')}\n"
                 f"   Content: {content_preview}{'...' if len(content) > 500 else ''}"
             )
         return "\n".join(formatted)
-    
+
     def _format_technologies_for_prompt(self, technologies: list[dict]) -> str:
         """Format technologies for inclusion in prompts.
-        
+
         Args:
             technologies: List of technology dictionaries.
-            
+
         Returns:
             Formatted string for prompts.
         """
@@ -87,13 +87,13 @@ class LLMAnalyzer:
                 f"Trend: {tech.get('trend_direction', 'N/A')}"
             )
         return "\n".join(formatted)
-    
+
     def _parse_json_response(self, response: str) -> dict:
         """Parse JSON from LLM response.
-        
+
         Args:
             response: Raw LLM response string.
-            
+
         Returns:
             Parsed dictionary or empty dict on failure.
         """
@@ -107,18 +107,18 @@ class LLMAnalyzer:
         except json.JSONDecodeError:
             pass
         return {}
-    
+
     async def generate_executive_summary(
-        self, 
-        articles: list[dict], 
+        self,
+        articles: list[dict],
         technologies: list[dict]
     ) -> str:
         """Generate an intelligent executive summary using LLM.
-        
+
         Args:
             articles: List of article dictionaries.
             technologies: List of technology dictionaries.
-            
+
         Returns:
             Generated executive summary string.
         """
@@ -138,26 +138,26 @@ Technologies:
 
 Generate an executive summary:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "articles": self._format_articles_for_prompt(articles),
             "technologies": self._format_technologies_for_prompt(technologies)
         })
-        
+
         return response
-    
+
     async def analyze_significance(
-        self, 
-        article: dict, 
+        self,
+        article: dict,
         related_technologies: list[dict]
     ) -> dict:
         """Analyze the significance of a news article using LLM.
-        
+
         Args:
             article: Article dictionary.
             related_technologies: List of related technology dictionaries.
-            
+
         Returns:
             Dictionary with significance analysis.
         """
@@ -181,7 +181,7 @@ Related Technologies: {technologies}
 
 Analyze the significance and return JSON:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         # Use full content if available, otherwise fall back to summary
         content = article.get("content", "") or article.get("summary", "")
@@ -190,17 +190,17 @@ Analyze the significance and return JSON:""")
             "content": content[:2000],  # Use more content for better analysis
             "technologies": ", ".join([t.get("name", "") for t in related_technologies])
         })
-        
+
         result = self._parse_json_response(response)
         result["article_title"] = article.get("title", "")
         return result
-    
+
     async def extract_entities_with_context(self, text: str) -> dict:
         """Extract companies and countries with context using LLM.
-        
+
         Args:
             text: Text to extract entities from.
-            
+
         Returns:
             Dictionary with companies and countries lists.
         """
@@ -215,27 +215,27 @@ Analyze the significance and return JSON:""")
 
 Extract entities and return JSON:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({"text": text[:2000]})
-        
+
         result = self._parse_json_response(response)
         return {
             "companies": result.get("companies", []),
             "countries": result.get("countries", [])
         }
-    
+
     async def generate_trend_analysis(
-        self, 
+        self,
         technologies: list[dict],
         articles: list[dict]
     ) -> str:
         """Generate trend analysis using LLM.
-        
+
         Args:
             technologies: List of technology dictionaries.
             articles: List of article dictionaries.
-            
+
         Returns:
             Generated trend analysis string.
         """
@@ -256,26 +256,26 @@ Recent Articles:
 
 Generate a comprehensive trend analysis:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "technologies": self._format_technologies_for_prompt(technologies),
             "articles": self._format_articles_for_prompt(articles[:15])
         })
-        
+
         return response
-    
+
     async def generate_company_analysis(
-        self, 
+        self,
         company_name: str,
         articles: list[dict]
     ) -> dict:
         """Generate detailed company analysis using LLM.
-        
+
         Args:
             company_name: Name of the company.
             articles: List of related article dictionaries.
-            
+
         Returns:
             Dictionary with company analysis.
         """
@@ -295,34 +295,34 @@ Related Articles:
 
 Generate a company analysis:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "company": company_name,
             "articles": self._format_articles_for_prompt(articles)
         })
-        
+
         return {
             "company": company_name,
             "analysis": response,
             "article_count": len(articles)
         }
-    
+
     async def generate_market_impact_summary(
-        self, 
+        self,
         significance_analyses: list[dict]
     ) -> str:
         """Generate a summary of market impact from significance analyses.
-        
+
         Args:
             significance_analyses: List of significance analysis dictionaries.
-            
+
         Returns:
             Generated market impact summary string.
         """
         if not significance_analyses:
             return "No significant market impacts identified in this period."
-        
+
         # Format analyses for prompt
         analyses_text = []
         for analysis in significance_analyses[:10]:
@@ -330,7 +330,7 @@ Generate a company analysis:""")
                 f"- {analysis.get('article_title', 'Unknown')}: "
                 f"{analysis.get('market_impact', 'N/A')}"
             )
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a market analyst. Synthesize the following market impact 
             analyses into a cohesive summary. Identify common themes, overall market direction, 
@@ -340,36 +340,36 @@ Generate a company analysis:""")
 
 Generate a market impact summary:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "analyses": "\n".join(analyses_text)
         })
-        
+
         return response
-    
+
     async def generate_geographic_insights(
-        self, 
+        self,
         countries: list[dict],
         articles: list[dict]
     ) -> str:
         """Generate geographic insights using LLM.
-        
+
         Args:
             countries: List of country dictionaries with mention counts.
             articles: List of article dictionaries.
-            
+
         Returns:
             Generated geographic insights string.
         """
         if not countries:
             return "No significant geographic patterns identified in this period."
-        
+
         countries_text = [
             f"- {c.get('name', 'Unknown')}: {c.get('mention_count', 0)} mentions"
             for c in countries[:10]
         ]
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a geopolitical analyst. Analyze the geographic distribution 
             of technology news coverage. Consider:
@@ -382,25 +382,25 @@ Generate a market impact summary:""")
 
 Generate geographic insights:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "countries": "\n".join(countries_text)
         })
-        
+
         return response
-    
+
     async def generate_technology_outlook(
-        self, 
+        self,
         technologies: list[dict],
         trend_analysis: str
     ) -> str:
         """Generate technology outlook using LLM.
-        
+
         Args:
             technologies: List of technology dictionaries.
             trend_analysis: Previously generated trend analysis.
-            
+
         Returns:
             Generated technology outlook string.
         """
@@ -420,21 +420,21 @@ Trend Analysis:
 
 Generate a technology outlook:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "technologies": self._format_technologies_for_prompt(technologies[:15]),
             "trend_analysis": trend_analysis[:1000]
         })
-        
+
         return response
-    
+
     async def categorize_article(self, article: dict) -> str:
         """Categorize an article using LLM.
-        
+
         Args:
             article: Article dictionary.
-            
+
         Returns:
             Category string.
         """
@@ -445,7 +445,7 @@ Generate a technology outlook:""")
             "Hardware/Interfaces", "Space Tech", "Manufacturing", "Materials",
             "General Technology"
         ]
-        
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", f"""You are a technology news categorizer. Categorize the given 
             article into exactly one of these categories:
@@ -457,29 +457,30 @@ Article Content: {content}
 
 Category:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         # Use full content if available, otherwise fall back to summary
         content = article.get("content", "") or article.get("summary", "")
         response = await chain.ainvoke({
             "title": article.get("title", ""),
-            "content": content[:1000]  # Use more content for better categorization
+            # Use more content for better categorization
+            "content": content[:1000]
         })
-        
+
         category = response.strip()
         return category if category in categories else "General Technology"
-    
+
     async def is_technology_related(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
         """Determine if an article is technology-related using LLM.
-        
+
         This method uses the LLM to analyze the article title (and optionally summary)
         to determine if it's related to technology topics. It returns a boolean
         indicating whether it's tech-related and a list of technology topics found.
-        
+
         Args:
             title: The article title to analyze.
             summary: Optional article summary for additional context.
-            
+
         Returns:
             Tuple of (is_tech_related: bool, tech_topics: list[str])
         """
@@ -515,19 +516,116 @@ Article Summary: {summary}
 
 Analyze and return JSON:""")
         ])
-        
+
         chain = prompt | self.llm | self.output_parser
         response = await chain.ainvoke({
             "title": title,
             "summary": summary[:500] if summary else "N/A"
         })
-        
+
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
         topics = result.get("tech_topics", [])
-        
+
         # Ensure is_tech is a boolean
         if isinstance(is_tech, str):
             is_tech = is_tech.lower() in ("true", "yes", "1")
-        
+
         return bool(is_tech), topics
+
+    async def calculate_relevance(
+        self,
+        title: str,
+        content: str = "",
+        tech_topics: list[str] = None
+    ) -> dict:
+        """Calculate relevance score for an article using LLM.
+
+        This method uses the LLM to assess how relevant an article is to technology
+        topics, considering factors like depth of coverage, significance, and
+        technology focus.
+
+        Args:
+            title: The article title.
+            content: The article content or summary.
+            tech_topics: Optional list of technology topics already identified.
+
+        Returns:
+            Dictionary with:
+            - relevance_score (float 0-1): overall relevance to technology
+            - depth_score (float 0-1): depth of technology coverage
+            - significance_score (float 0-1): significance of the technology news
+            - reasoning (str): brief explanation of the scores
+        """
+        topics_context = ""
+        if tech_topics:
+            topics_context = f"\nTechnology topics already identified: {', '.join(tech_topics)}"
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a technology news relevance assessor. Analyze the given article
+            and assess its relevance to technology topics.
+            
+            Consider these factors:
+            1. DEPTH: How deeply does the article discuss technology? (Is it the main focus or just mentioned in passing?)
+            2. SIGNIFICANCE: How significant is this technology news? (Breaking news, analysis, or routine update?)
+            3. RELEVANCE: Overall, how relevant is this to someone following technology developments?
+            
+            Scoring guidelines:
+            - 0.0-0.2: Technology mentioned only in passing, not the main focus
+            - 0.3-0.5: Technology is discussed but not deeply, or is peripheral to main topic
+            - 0.6-0.8: Technology is a significant focus, good depth of coverage
+            - 0.9-1.0: Deep technology analysis, breaking news, or highly significant development
+            
+            Return a JSON object with these keys:
+            - relevance_score (float 0-1): overall relevance to technology
+            - depth_score (float 0-1): depth of technology coverage
+            - significance_score (float 0-1): significance of the technology news
+            - reasoning (string): brief explanation of the scores (1-2 sentences)"""),
+            ("user", """Article Title: {title}
+Article Content: {content}{topics_context}
+
+Analyze and return JSON:""")
+        ])
+
+        chain = prompt | self.llm | self.output_parser
+        response = await chain.ainvoke({
+            "title": title,
+            "content": content[:1000] if content else "N/A",
+            "topics_context": topics_context
+        })
+
+        result = self._parse_json_response(response)
+
+        # Ensure scores are floats in valid range
+        relevance = result.get("relevance_score", 0.5)
+        depth = result.get("depth_score", 0.5)
+        significance = result.get("significance_score", 0.5)
+
+        # Convert string scores to floats if needed
+        if isinstance(relevance, str):
+            try:
+                relevance = float(relevance)
+            except ValueError:
+                relevance = 0.5
+        if isinstance(depth, str):
+            try:
+                depth = float(depth)
+            except ValueError:
+                depth = 0.5
+        if isinstance(significance, str):
+            try:
+                significance = float(significance)
+            except ValueError:
+                significance = 0.5
+
+        # Clamp to valid range
+        relevance = max(0.0, min(1.0, float(relevance)))
+        depth = max(0.0, min(1.0, float(depth)))
+        significance = max(0.0, min(1.0, float(significance)))
+
+        return {
+            "relevance_score": relevance,
+            "depth_score": depth,
+            "significance_score": significance,
+            "reasoning": result.get("reasoning", "No reasoning provided")
+        }

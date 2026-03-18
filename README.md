@@ -27,7 +27,7 @@ A sophisticated multi-agent system for analyzing tech news, identifying emerging
 
 ```bash
 # Clone the repository
-cd multiagents
+cd tech-news-multiagent
 
 # Install dependencies
 pip install -e .
