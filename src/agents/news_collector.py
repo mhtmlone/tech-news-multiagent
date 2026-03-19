@@ -112,6 +112,7 @@ class NewsCollectorAgent(BaseAgent):
         sqlite_store: SQLiteStore = None,
         extract_entities: bool = True,
         rss_config: RSSConfig = None,
+        verbose: bool = False,
         **kwargs
     ):
         super().__init__(name="NewsCollectorAgent", **kwargs)
@@ -120,6 +121,7 @@ class NewsCollectorAgent(BaseAgent):
         self.rss_config = rss_config or RSSConfig()
         self.sources = self.rss_config.get_sources()
         self.keywords = self.rss_config.get_keywords()
+        self.verbose = verbose
 
         # Initialize failure logger if enabled
         self.failure_logger = FailureLogger(
@@ -177,6 +179,9 @@ class NewsCollectorAgent(BaseAgent):
            Note: Playwright is skipped for DataDome-protected sites (e.g. Reuters)
                because DataDome uses behavioral analysis that blocks headless browsers.
         """
+        if self.verbose:
+            print(f"    📄 Fetching article content: {url}")
+        
         # First, try to get HTML content via standard HTTP
         html_content = await self._fetch_html_content(url)
 
@@ -772,13 +777,19 @@ class NewsCollectorAgent(BaseAgent):
 
         return ""
 
-    async def fetch_feed(self, url: str) -> list[dict]:
+    async def fetch_feed(self, url: str, feed_index: int = 0, total_feeds: int = 0) -> list[dict]:
         await self._ensure_session()
         entries = []
         is_36kr_feed = "36kr" in url.lower()
+        
+        if self.verbose:
+            feed_progress = f"[{feed_index}/{total_feeds}]" if total_feeds > 0 else ""
+            print(f"  {feed_progress} Fetching RSS feed: {url}")
 
         try:
             async with self.session.get(url) as response:
+                if self.verbose:
+                    print(f"    → HTTP {response.status} received")
                 if response.status == 200:
                     feed_content = await response.text()
                     feed = feedparser.parse(feed_content)
@@ -896,13 +907,26 @@ class NewsCollectorAgent(BaseAgent):
     async def fetch_all_feeds(self) -> list[dict]:
         await self._ensure_session()
         all_entries = []
+        total_feeds = len(self.sources)
+        
+        if self.verbose:
+            print(f"\n  📡 Fetching {total_feeds} RSS feeds...")
 
-        tasks = [self.fetch_feed(url) for url in self.sources]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Process feeds sequentially when verbose to show progress
+        if self.verbose:
+            for idx, url in enumerate(self.sources, 1):
+                result = await self.fetch_feed(url, feed_index=idx, total_feeds=total_feeds)
+                if isinstance(result, list):
+                    all_entries.extend(result)
+                    print(f"    → Got {len(result)} entries from this feed")
+        else:
+            # Process feeds in parallel when not verbose (faster)
+            tasks = [self.fetch_feed(url) for url in self.sources]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for result in results:
-            if isinstance(result, list):
-                all_entries.extend(result)
+            for result in results:
+                if isinstance(result, list):
+                    all_entries.extend(result)
 
         return all_entries
 
@@ -1142,21 +1166,36 @@ class NewsCollectorAgent(BaseAgent):
         cutoff_date = datetime.now() - timedelta(days=max_age_days)
 
         # Fetch all RSS feed entries
+        if self.verbose:
+            print("\n📡 Fetching RSS feeds...")
         entries = await self.fetch_all_feeds()
         logger.info(
             f"Fetched {len(entries)} total entries from {len(self.sources)} sources")
+        
+        if self.verbose:
+            print(f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources")
 
         # Filter out entries with URLs that have already been collected
         entries = self.filter_new_entries(entries)
         logger.info(
             f"Processing {len(entries)} new entries after deduplication")
+        
+        if self.verbose:
+            print(f"  ✓ {len(entries)} new entries after deduplication")
 
         technology_mentions = []
         stored_article_ids = []
+        
+        if self.verbose and entries:
+            print(f"\n📰 Processing {len(entries)} articles...")
 
-        for entry in entries:
+        for idx, entry in enumerate(entries, 1):
             if entry["published"] and entry["published"] < cutoff_date:
                 continue
+
+            if self.verbose:
+                title_preview = entry['title'][:60] + "..." if len(entry['title']) > 60 else entry['title']
+                print(f"  [{idx}/{len(entries)}] Analyzing: {title_preview}")
 
             # Use LLM-based classification if available, otherwise fall back to keywords
             is_tech, tech_topics = await self.is_technology_related_async(
@@ -1164,6 +1203,8 @@ class NewsCollectorAgent(BaseAgent):
             )
 
             if not is_tech:
+                if self.verbose:
+                    print(f"      → Skipped (not tech-related)")
                 continue
 
             # Use LLM-based relevance assessment if available, otherwise fall back to keywords
@@ -1172,9 +1213,14 @@ class NewsCollectorAgent(BaseAgent):
             )
 
             if relevance < 0.1:
+                if self.verbose:
+                    print(f"      → Skipped (relevance too low: {relevance:.2f})")
                 continue
 
             sentiment = await self.analyze_sentiment(f"{entry['title']} {entry['summary']}")
+            
+            if self.verbose:
+                print(f"      → Tech article found (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
 
             # Fetch full article content
             article_content = await self.fetch_article_content(entry["link"])
@@ -1190,7 +1236,7 @@ class NewsCollectorAgent(BaseAgent):
 
             # Use full content for summary if available, otherwise fall back to RSS summary
             full_text = article_content if article_content else entry["summary"]
-            summary_for_mention = full_text[:500] if full_text else ""
+            summary_for_mention = full_text if full_text else ""
 
             mention = TechnologyMention(
                 source=entry["source"],
@@ -1211,7 +1257,7 @@ class NewsCollectorAgent(BaseAgent):
                 "url": entry["link"],
                 "source": entry["source"],
                 "published_date": entry["published"].isoformat() if entry["published"] else None,
-                "summary": entry["summary"][:1000] if entry["summary"] else "",
+                "summary": entry["summary"] if entry["summary"] else "",
                 "content": article_content,  # Store full article content
                 "sentiment_score": sentiment,
                 "relevance_score": relevance,

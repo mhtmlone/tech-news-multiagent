@@ -92,6 +92,9 @@ class TechNewsMultiAgentSystem:
 
         if verbose:
             console.print("\n[bold]Step 1/5:[/bold] Collecting news articles...")
+        
+        # Set verbose mode on news collector for detailed progress
+        self.news_collector.verbose = verbose
         news_mentions = await self.news_collector.process(
             {"max_age_days": max_age_days, "sources": sources}
         )

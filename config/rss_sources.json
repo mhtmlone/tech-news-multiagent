@@ -26,7 +26,7 @@
       "category": "community"
     },
     {
-      "url": "https://www.zdnet.com/news/rss/",
+      "url": "https://www.zdnet.com/news/rss.xml",
       "name": "ZDNet",
       "category": "tech_news"
     },
