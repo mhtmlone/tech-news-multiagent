@@ -10,6 +10,9 @@ To the new schema:
 - article_technologies (article_id, technology_id, relevance, context)
 - technologies (id, name, category, first_mentioned, last_mentioned, mention_count)
 
+Also adds is_tech_related column to news_articles table for storing all articles
+(including non-tech) for deduplication purposes.
+
 Usage:
     python scripts/migrate_db_schema.py [--db-path PATH] [--backup] [--dry-run]
 
@@ -73,6 +76,20 @@ def check_new_schema(cursor: sqlite3.Cursor) -> bool:
         ('article_companies', 'article_countries', 'article_technologies', 'technologies')
     """)
     return len(cursor.fetchall()) == 4
+
+
+def check_is_tech_related_column(cursor: sqlite3.Cursor) -> bool:
+    """Check if the is_tech_related column exists in news_articles table.
+    
+    Args:
+        cursor: Database cursor.
+        
+    Returns:
+        True if column exists, False otherwise.
+    """
+    cursor.execute("PRAGMA table_info(news_articles)")
+    columns = [row[1] for row in cursor.fetchall()]
+    return 'is_tech_related' in columns
 
 
 def get_migration_stats(cursor: sqlite3.Cursor) -> dict:
@@ -282,6 +299,30 @@ def drop_old_table(cursor: sqlite3.Cursor, dry_run: bool = False) -> str:
     return stmt
 
 
+def add_is_tech_related_column(cursor: sqlite3.Cursor, dry_run: bool = False) -> tuple[bool, str]:
+    """Add is_tech_related column to news_articles table if it doesn't exist.
+    
+    This column is used to track whether an article is tech-related,
+    allowing non-tech articles to be stored for deduplication purposes.
+    
+    Args:
+        cursor: Database cursor.
+        dry_run: If True, return SQL without executing.
+        
+    Returns:
+        Tuple of (column_added, sql_statement).
+    """
+    if check_is_tech_related_column(cursor):
+        return False, "Column is_tech_related already exists"
+    
+    stmt = "ALTER TABLE news_articles ADD COLUMN is_tech_related BOOLEAN DEFAULT TRUE"
+    
+    if not dry_run:
+        cursor.execute(stmt)
+    
+    return True, stmt
+
+
 def run_migration(db_path: Path, backup: bool = True, dry_run: bool = False) -> None:
     """Run the database migration.
     
@@ -306,30 +347,34 @@ def run_migration(db_path: Path, backup: bool = True, dry_run: bool = False) -> 
         # Check current schema
         has_old_schema = check_old_schema(cursor)
         has_new_schema = check_new_schema(cursor)
+        has_is_tech_related = check_is_tech_related_column(cursor)
         
         print("Schema status:")
         print(f"  - Old article_entities table: {'EXISTS' if has_old_schema else 'NOT FOUND'}")
         print(f"  - New junction tables: {'EXISTS' if has_new_schema else 'NOT FOUND'}")
+        print(f"  - is_tech_related column: {'EXISTS' if has_is_tech_related else 'NOT FOUND'}")
         print()
+        
+        # Check if any migration is needed
+        if not has_old_schema and has_new_schema and has_is_tech_related:
+            print("All migrations already completed - database is up to date.")
+            return
         
         if not has_old_schema and not has_new_schema:
             print("No migration needed - database appears to be empty or new.")
             return
         
-        if not has_old_schema and has_new_schema:
-            print("Migration already completed - new schema is in place.")
-            return
-        
         # Get migration statistics
-        stats = get_migration_stats(cursor)
-        print("Migration statistics:")
-        print(f"  - Articles: {stats['articles_count']}")
-        print(f"  - Companies: {stats['companies_count']}")
-        print(f"  - Countries: {stats['countries_count']}")
-        print(f"  - Article-entities rows: {stats['article_entities_count']}")
-        print(f"  - Unique article-company pairs: {stats['unique_article_companies']}")
-        print(f"  - Unique article-country pairs: {stats['unique_article_countries']}")
-        print()
+        if has_old_schema:
+            stats = get_migration_stats(cursor)
+            print("Migration statistics:")
+            print(f"  - Articles: {stats['articles_count']}")
+            print(f"  - Companies: {stats['companies_count']}")
+            print(f"  - Countries: {stats['countries_count']}")
+            print(f"  - Article-entities rows: {stats['article_entities_count']}")
+            print(f"  - Unique article-company pairs: {stats['unique_article_companies']}")
+            print(f"  - Unique article-country pairs: {stats['unique_article_countries']}")
+            print()
         
         if dry_run:
             print("DRY RUN - No changes will be made")
@@ -341,36 +386,48 @@ def run_migration(db_path: Path, backup: bool = True, dry_run: bool = False) -> 
             print(f"Backup created: {backup_path}")
             print()
         
-        # Create new tables
-        print("Creating new tables...")
-        statements = create_new_tables(cursor, dry_run)
-        for stmt in statements:
-            # Format for display
-            stmt_display = ' '.join(stmt.split())
-            print(f"  - {stmt_display[:80]}...")
+        # Migrate article_entities to junction tables (if needed)
+        if has_old_schema and not has_new_schema:
+            # Create new tables
+            print("Creating new tables...")
+            statements = create_new_tables(cursor, dry_run)
+            for stmt in statements:
+                # Format for display
+                stmt_display = ' '.join(stmt.split())
+                print(f"  - {stmt_display[:80]}...")
+            
+            if not dry_run:
+                conn.commit()
+            print()
+            
+            # Migrate data
+            print("Migrating data from article_entities...")
+            companies_migrated, countries_migrated = migrate_article_entities(cursor, dry_run)
+            print(f"  - Article-company links: {companies_migrated}")
+            print(f"  - Article-country links: {countries_migrated}")
+            
+            if not dry_run:
+                conn.commit()
+            print()
+            
+            # Drop old table
+            print("Dropping old article_entities table...")
+            drop_stmt = drop_old_table(cursor, dry_run)
+            print(f"  - {drop_stmt}")
+            
+            if not dry_run:
+                conn.commit()
+            print()
         
-        if not dry_run:
-            conn.commit()
-        print()
-        
-        # Migrate data
-        print("Migrating data from article_entities...")
-        companies_migrated, countries_migrated = migrate_article_entities(cursor, dry_run)
-        print(f"  - Article-company links: {companies_migrated}")
-        print(f"  - Article-country links: {countries_migrated}")
-        
-        if not dry_run:
-            conn.commit()
-        print()
-        
-        # Drop old table
-        print("Dropping old article_entities table...")
-        drop_stmt = drop_old_table(cursor, dry_run)
-        print(f"  - {drop_stmt}")
-        
-        if not dry_run:
-            conn.commit()
-        print()
+        # Add is_tech_related column (if needed)
+        if not has_is_tech_related:
+            print("Adding is_tech_related column to news_articles table...")
+            column_added, stmt = add_is_tech_related_column(cursor, dry_run)
+            print(f"  - {stmt}")
+            
+            if not dry_run:
+                conn.commit()
+            print()
         
         # Final status
         if dry_run:
@@ -378,10 +435,13 @@ def run_migration(db_path: Path, backup: bool = True, dry_run: bool = False) -> 
             print("Run without --dry-run to apply changes")
         else:
             print("MIGRATION COMPLETE")
-            print(f"  - Created 4 new tables: technologies, article_technologies, article_companies, article_countries")
-            print(f"  - Migrated {companies_migrated} article-company links")
-            print(f"  - Migrated {countries_migrated} article-country links")
-            print(f"  - Dropped old article_entities table")
+            if has_old_schema and not has_new_schema:
+                print(f"  - Created 4 new tables: technologies, article_technologies, article_companies, article_countries")
+                print(f"  - Migrated {companies_migrated} article-company links")
+                print(f"  - Migrated {countries_migrated} article-country links")
+                print(f"  - Dropped old article_entities table")
+            if not has_is_tech_related:
+                print(f"  - Added is_tech_related column to news_articles table")
         
     finally:
         conn.close()

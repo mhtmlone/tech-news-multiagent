@@ -46,6 +46,7 @@ class SQLiteStore:
                 content TEXT,
                 sentiment_score REAL,
                 relevance_score REAL,
+                is_tech_related BOOLEAN DEFAULT TRUE,
                 category TEXT,
                 keywords TEXT,
                 processed BOOLEAN DEFAULT FALSE
@@ -199,8 +200,8 @@ class SQLiteStore:
             cursor.execute("""
                 INSERT OR REPLACE INTO news_articles 
                 (id, title, url, source, author, published_date, collected_date,
-                 summary, content, sentiment_score, relevance_score, category, keywords, processed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 summary, content, sentiment_score, relevance_score, is_tech_related, category, keywords, processed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 article_id,
                 article_data.get("title", ""),
@@ -213,6 +214,7 @@ class SQLiteStore:
                 article_data.get("content"),
                 article_data.get("sentiment_score", 0.0),
                 article_data.get("relevance_score", 0.0),
+                article_data.get("is_tech_related", True),
                 article_data.get("category", "General"),
                 json.dumps(article_data.get("keywords", [])),
                 article_data.get("processed", False)
@@ -224,7 +226,7 @@ class SQLiteStore:
                 UPDATE news_articles SET
                     title = ?, source = ?, author = ?, published_date = ?,
                     summary = ?, content = ?, sentiment_score = ?,
-                    relevance_score = ?, category = ?, keywords = ?
+                    relevance_score = ?, is_tech_related = ?, category = ?, keywords = ?
                 WHERE url = ?
             """, (
                 article_data.get("title", ""),
@@ -235,6 +237,7 @@ class SQLiteStore:
                 article_data.get("content"),
                 article_data.get("sentiment_score", 0.0),
                 article_data.get("relevance_score", 0.0),
+                article_data.get("is_tech_related", True),
                 article_data.get("category", "General"),
                 json.dumps(article_data.get("keywords", [])),
                 article_data.get("url", "")

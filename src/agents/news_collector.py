@@ -1207,25 +1207,18 @@ class NewsCollectorAgent(BaseAgent):
                 entry['title'], entry['summary']
             )
 
-            if not is_tech:
-                if self.verbose:
-                    print(f"      → Skipped (not tech-related)")
-                continue
-
             # Use LLM-based relevance assessment if available, otherwise fall back to keywords
             relevance = await self.calculate_relevance_async(
                 entry['title'], entry['summary'], tech_topics
             )
 
-            if relevance < 0.1:
-                if self.verbose:
-                    print(f"      → Skipped (relevance too low: {relevance:.2f})")
-                continue
-
             sentiment = await self.analyze_sentiment(f"{entry['title']} {entry['summary']}")
             
             if self.verbose:
-                print(f"      → Tech article found (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
+                if is_tech:
+                    print(f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
+                else:
+                    print(f"      → Non-tech article (stored for deduplication)")
 
             # Fetch full article content
             article_content = await self.fetch_article_content(entry["link"])
@@ -1243,19 +1236,8 @@ class NewsCollectorAgent(BaseAgent):
             full_text = article_content if article_content else entry["summary"]
             summary_for_mention = full_text if full_text else ""
 
-            mention = TechnologyMention(
-                source=entry["source"],
-                url=entry["link"],
-                title=entry["title"],
-                published_date=entry["published"],
-                summary=summary_for_mention,
-                sentiment_score=sentiment,
-                relevance_score=relevance,
-            )
-
-            technology_mentions.append(mention)
-
-            # Store article in SQLite with full content
+            # Store ALL articles in SQLite for deduplication purposes
+            # This ensures we don't re-process non-tech or low-relevance articles
             article_data = {
                 "id": str(uuid.uuid4()),
                 "title": entry["title"],
@@ -1266,84 +1248,99 @@ class NewsCollectorAgent(BaseAgent):
                 "content": article_content,  # Store full article content
                 "sentiment_score": sentiment,
                 "relevance_score": relevance,
+                "is_tech_related": is_tech,  # Track whether article is tech-related
                 "keywords": tech_topics,  # Technology topics identified by LLM or keyword matching
             }
 
             article_id = self.sqlite_store.store_article(article_data)
             stored_article_ids.append(article_id)
 
-            # Extract and store entities from full content using unified extraction
-            if self.extract_entities and self.entity_extractor:
-                # Use unified extraction that gets technologies, companies, and countries
-                entities = await self.entity_extractor.extract_all_unified(
-                    title=entry['title'],
-                    content=full_text,
-                    summary=entry.get('summary', '')
+            # Only create technology mentions and extract entities for tech-related articles
+            if is_tech and relevance >= 0.1:
+                mention = TechnologyMention(
+                    source=entry["source"],
+                    url=entry["link"],
+                    title=entry["title"],
+                    published_date=entry["published"],
+                    summary=summary_for_mention,
+                    sentiment_score=sentiment,
+                    relevance_score=relevance,
                 )
 
-                # Store companies and link to article
-                company_ids = []
-                company_data = []
-                for company in entities.get("companies", []):
-                    company_id = self.sqlite_store.store_company({
-                        "name": company["name"],
-                        "country": company.get("country"),
-                        "industry": company.get("industry"),
-                    })
-                    company_ids.append(company_id)
-                    company_data.append({
-                        "company_id": company_id,
-                        "relevance": company.get("relevance", 0.5),
-                        "context": company.get("context", ""),
-                    })
+                technology_mentions.append(mention)
 
-                # Store countries and link to article
-                country_ids = []
-                country_data = []
-                for country in entities.get("countries", []):
-                    country_id = self.sqlite_store.store_country({
-                        "name": country["name"],
-                        "code": country.get("code"),
-                    })
-                    country_ids.append(country_id)
-                    country_data.append({
-                        "country_id": country_id,
-                        "relevance": country.get("relevance", 0.5),
-                        "context": country.get("context", ""),
-                    })
-
-                # Store technologies and link to article
-                technology_ids = []
-                technology_data = []
-                for tech in entities.get("technologies", []):
-                    technology_id = self.sqlite_store.store_technology({
-                        "name": tech["name"],
-                        "category": tech.get("category", "General Technology"),
-                    })
-                    technology_ids.append(technology_id)
-                    technology_data.append({
-                        "technology_id": technology_id,
-                        "relevance": tech.get("relevance", 0.5),
-                        "context": tech.get("context", ""),
-                    })
-
-                # Link article with companies
-                if company_ids:
-                    self.sqlite_store.link_article_companies(
-                        article_id, company_ids, company_data
+                # Extract and store entities from full content using unified extraction
+                if self.extract_entities and self.entity_extractor:
+                    # Use unified extraction that gets technologies, companies, and countries
+                    entities = await self.entity_extractor.extract_all_unified(
+                        title=entry['title'],
+                        content=full_text,
+                        summary=entry.get('summary', '')
                     )
 
-                # Link article with countries
-                if country_ids:
-                    self.sqlite_store.link_article_countries(
-                        article_id, country_ids, country_data
-                    )
+                    # Store companies and link to article
+                    company_ids = []
+                    company_data = []
+                    for company in entities.get("companies", []):
+                        company_id = self.sqlite_store.store_company({
+                            "name": company["name"],
+                            "country": company.get("country"),
+                            "industry": company.get("industry"),
+                        })
+                        company_ids.append(company_id)
+                        company_data.append({
+                            "company_id": company_id,
+                            "relevance": company.get("relevance", 0.5),
+                            "context": company.get("context", ""),
+                        })
 
-                # Link article with technologies
-                if technology_ids:
-                    self.sqlite_store.link_article_technologies(
-                        article_id, technology_ids, technology_data
-                    )
+                    # Store countries and link to article
+                    country_ids = []
+                    country_data = []
+                    for country in entities.get("countries", []):
+                        country_id = self.sqlite_store.store_country({
+                            "name": country["name"],
+                            "code": country.get("code"),
+                        })
+                        country_ids.append(country_id)
+                        country_data.append({
+                            "country_id": country_id,
+                            "relevance": country.get("relevance", 0.5),
+                            "context": country.get("context", ""),
+                        })
+
+                    # Store technologies and link to article
+                    technology_ids = []
+                    technology_data = []
+                    for tech in entities.get("technologies", []):
+                        technology_id = self.sqlite_store.store_technology({
+                            "name": tech["name"],
+                            "category": tech.get("category", "General Technology"),
+                        })
+                        technology_ids.append(technology_id)
+                        technology_data.append({
+                            "technology_id": technology_id,
+                            "relevance": tech.get("relevance", 0.5),
+                            "context": tech.get("context", ""),
+                        })
+
+                    # Link article with companies
+                    if company_ids:
+                        self.sqlite_store.link_article_companies(
+                            article_id, company_ids, company_data
+                        )
+
+                    # Link article with countries
+                    if country_ids:
+                        self.sqlite_store.link_article_countries(
+                            article_id, country_ids, country_data
+                        )
+
+                    # Link article with technologies
+                    if technology_ids:
+                        self.sqlite_store.link_article_technologies(
+                            article_id, technology_ids, technology_data
+                        )
 
         technology_mentions.sort(key=lambda x: (
             x.relevance_score, x.published_date), reverse=True)

@@ -84,6 +84,7 @@ class NewsArticle(BaseModel):
     content: Optional[str] = None
     sentiment_score: float = Field(ge=-1.0, le=1.0, default=0.0)
     relevance_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    is_tech_related: bool = True  # Track whether article is tech-related for filtering
     category: str = "General"
     keywords: list[str] = Field(default_factory=list)
     processed: bool = False
@@ -131,8 +132,8 @@ class EntityExtraction(BaseModel):
     context: dict[str, str] = Field(default_factory=dict)
 
 
-class TechnologyMention(BaseModel):
-    """Model for a technology mention in an article."""
+class ExtractedTechnology(BaseModel):
+    """Model for a technology extracted from an article during entity extraction."""
     name: str
     category: str = "General Technology"
     relevance: float = Field(ge=0.0, le=1.0, default=0.5)
@@ -142,7 +143,7 @@ class TechnologyMention(BaseModel):
 class UnifiedExtraction(BaseModel):
     """Model for unified extraction results from LLM."""
     is_technology_related: bool = True
-    technologies: list[TechnologyMention] = Field(default_factory=list)
+    technologies: list[ExtractedTechnology] = Field(default_factory=list)
     companies: list[Company] = Field(default_factory=list)
     countries: list[CountryMention] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)

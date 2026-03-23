@@ -209,8 +209,8 @@ Analyze the significance and return JSON:""")
             For each entity, provide the context in which it was mentioned.
             
             Return a JSON object with these keys:
-            - companies: list of objects with {name, context, sentiment (positive/negative/neutral)}
-            - countries: list of objects with {name, context}"""),
+            - companies: list of objects with {{name, context, sentiment (positive/negative/neutral)}}
+            - countries: list of objects with {{name, context}}"""),
             ("user", """Text: {text}
 
 Extract entities and return JSON:""")
@@ -291,20 +291,20 @@ Extract entities and return JSON:""")
                - confidence: confidence level 0-1 for the classification
 
             Return a JSON object with these exact keys:
-            {
+            {{
                 "is_technology_related": boolean,
                 "confidence": float,
                 "technologies": [
-                    {"name": string, "category": string, "relevance": float, "context": string}
+                    {{"name": string, "category": string, "relevance": float, "context": string}}
                 ],
                 "companies": [
-                    {"name": string, "country": string or null, "industry": string or null, 
-                     "context": string, "sentiment": string}
+                    {{"name": string, "country": string or null, "industry": string or null,
+                     "context": string, "sentiment": string}}
                 ],
                 "countries": [
-                    {"name": string, "context": string}
+                    {{"name": string, "context": string}}
                 ]
-            }"""),
+            }}"""),
             ("user", """Article Title: {title}
 
 Article Content:
@@ -419,49 +419,6 @@ Generate a comprehensive trend analysis:""")
 
         return response
 
-    async def generate_company_analysis(
-        self,
-        company_name: str,
-        articles: list[dict]
-    ) -> dict:
-        """Generate detailed company analysis using LLM.
-
-        Args:
-            company_name: Name of the company.
-            articles: List of related article dictionaries.
-
-        Returns:
-            Dictionary with company analysis.
-        """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a business intelligence analyst. Analyze the news 
-            coverage of a company and provide insights on:
-            1. Recent activities and announcements
-            2. Strategic direction
-            3. Market position
-            4. Technology focus areas
-            
-            Provide a concise analysis in 2-3 paragraphs."""),
-            ("user", """Company: {company}
-
-Related Articles:
-{articles}
-
-Generate a company analysis:""")
-        ])
-
-        chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
-            "company": company_name,
-            "articles": self._format_articles_for_prompt(articles)
-        })
-
-        return {
-            "company": company_name,
-            "analysis": response,
-            "article_count": len(articles)
-        }
-
     async def generate_market_impact_summary(
         self,
         significance_analyses: list[dict]
@@ -543,86 +500,6 @@ Generate geographic insights:""")
         })
 
         return response
-
-    async def generate_technology_outlook(
-        self,
-        technologies: list[dict],
-        trend_analysis: str
-    ) -> str:
-        """Generate technology outlook using LLM.
-
-        Args:
-            technologies: List of technology dictionaries.
-            trend_analysis: Previously generated trend analysis.
-
-        Returns:
-            Generated technology outlook string.
-        """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology futurist. Based on the current trends and 
-            technologies, provide an outlook for the next 6-12 months. Consider:
-            1. Technologies likely to gain momentum
-            2. Potential breakthroughs
-            3. Investment opportunities
-            4. Risk areas
-            Keep the outlook to 2-3 paragraphs."""),
-            ("user", """Current Technologies:
-{technologies}
-
-Trend Analysis:
-{trend_analysis}
-
-Generate a technology outlook:""")
-        ])
-
-        chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
-            "technologies": self._format_technologies_for_prompt(technologies[:15]),
-            "trend_analysis": trend_analysis[:1000]
-        })
-
-        return response
-
-    async def categorize_article(self, article: dict) -> str:
-        """Categorize an article using LLM.
-
-        Args:
-            article: Article dictionary.
-
-        Returns:
-            Category string.
-        """
-        categories = [
-            "AI/ML", "Quantum Computing", "Blockchain/Web3", "Robotics",
-            "Cloud/Infrastructure", "Cybersecurity", "Telecommunications",
-            "IoT", "AR/VR/MR", "Biotech", "Energy/Cleantech", "Semiconductors",
-            "Hardware/Interfaces", "Space Tech", "Manufacturing", "Materials",
-            "General Technology"
-        ]
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", f"""You are a technology news categorizer. Categorize the given 
-            article into exactly one of these categories:
-            {', '.join(categories)}
-            
-            Return only the category name, nothing else."""),
-            ("user", """Article Title: {title}
-Article Content: {content}
-
-Category:""")
-        ])
-
-        chain = prompt | self.llm | self.output_parser
-        # Use full content if available, otherwise fall back to summary
-        content = article.get("content", "") or article.get("summary", "")
-        response = await chain.ainvoke({
-            "title": article.get("title", ""),
-            # Use more content for better categorization
-            "content": content[:1000]
-        })
-
-        category = response.strip()
-        return category if category in categories else "General Technology"
 
     async def is_technology_related(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
         """Determine if an article is technology-related using LLM.
