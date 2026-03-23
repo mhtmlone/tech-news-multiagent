@@ -131,6 +131,23 @@ class EntityExtraction(BaseModel):
     context: dict[str, str] = Field(default_factory=dict)
 
 
+class TechnologyMention(BaseModel):
+    """Model for a technology mention in an article."""
+    name: str
+    category: str = "General Technology"
+    relevance: float = Field(ge=0.0, le=1.0, default=0.5)
+    context: str = ""
+
+
+class UnifiedExtraction(BaseModel):
+    """Model for unified extraction results from LLM."""
+    is_technology_related: bool = True
+    technologies: list[TechnologyMention] = Field(default_factory=list)
+    companies: list[Company] = Field(default_factory=list)
+    countries: list[CountryMention] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+
+
 class ReportSection(BaseModel):
     """Model for a section in a report."""
     title: str

@@ -225,6 +225,160 @@ Extract entities and return JSON:""")
             "countries": result.get("countries", [])
         }
 
+    async def extract_all_entities(
+        self,
+        title: str,
+        content: str = "",
+        summary: str = ""
+    ) -> dict:
+        """Extract all entities (technologies, companies, countries) from article in a single LLM call.
+
+        This unified method extracts technologies, companies, and countries in one call
+        for efficiency and consistency.
+
+        Args:
+            title: The article title.
+            content: The article content (optional).
+            summary: The article summary (optional).
+
+        Returns:
+            Dictionary with:
+            - is_technology_related (bool): whether the article is tech-related
+            - technologies (list): list of technology topics with category and relevance
+            - companies (list): list of companies with country and context
+            - countries (list): list of countries with context
+            - confidence (float): confidence level of the extraction
+        """
+        # Combine available text, prioritizing content over summary
+        full_text = f"{title}\n\n"
+        if content:
+            full_text += content[:2000]
+        elif summary:
+            full_text += summary[:1000]
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a technology news analyzer. Extract ALL entities from the given article 
+            in a single comprehensive analysis.
+
+            Extract the following:
+            1. TECHNOLOGIES: Technology topics, products, frameworks, or concepts mentioned
+               - Include AI/ML, programming languages, frameworks, hardware, cloud services, etc.
+               - For each technology, provide:
+                 * name: the technology name
+                 * category: one of [AI/ML, Quantum Computing, Blockchain/Web3, Robotics, 
+                   Cloud/Infrastructure, Cybersecurity, Telecommunications, IoT, AR/VR/MR, 
+                   Biotech, Energy/Cleantech, Semiconductors, Hardware/Interfaces, Space Tech, 
+                   Manufacturing, Materials, General Technology]
+                 * relevance: relevance score 0-1
+                 * context: brief context of how it's mentioned
+
+            2. COMPANIES: Companies and organizations mentioned
+               - Include tech companies, startups, research labs, etc.
+               - For each company, provide:
+                 * name: company name
+                 * country: country of origin if known (or null)
+                 * industry: industry sector if known (or null)
+                 * context: brief context of how it's mentioned
+                 * sentiment: positive, negative, or neutral
+
+            3. COUNTRIES: Countries and regions mentioned in relation to technology
+               - For each country, provide:
+                 * name: country name
+                 * context: brief context of how it's mentioned
+
+            4. CLASSIFICATION:
+               - is_technology_related: true if the article is primarily about technology
+               - confidence: confidence level 0-1 for the classification
+
+            Return a JSON object with these exact keys:
+            {
+                "is_technology_related": boolean,
+                "confidence": float,
+                "technologies": [
+                    {"name": string, "category": string, "relevance": float, "context": string}
+                ],
+                "companies": [
+                    {"name": string, "country": string or null, "industry": string or null, 
+                     "context": string, "sentiment": string}
+                ],
+                "countries": [
+                    {"name": string, "context": string}
+                ]
+            }"""),
+            ("user", """Article Title: {title}
+
+Article Content:
+{content}
+
+Extract all entities and return JSON:""")
+        ])
+
+        chain = prompt | self.llm | self.output_parser
+        response = await chain.ainvoke({
+            "title": title,
+            "content": full_text[:2500]  # Limit total text length
+        })
+
+        result = self._parse_json_response(response)
+
+        # Normalize and validate results
+        is_tech = result.get("is_technology_related", False)
+        if isinstance(is_tech, str):
+            is_tech = is_tech.lower() in ("true", "yes", "1")
+
+        confidence = result.get("confidence", 0.5)
+        if isinstance(confidence, str):
+            try:
+                confidence = float(confidence)
+            except ValueError:
+                confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+
+        # Ensure all lists exist
+        technologies = result.get("technologies", [])
+        companies = result.get("companies", [])
+        countries = result.get("countries", [])
+
+        # Validate and normalize technology entries
+        validated_technologies = []
+        for tech in technologies:
+            if isinstance(tech, dict) and tech.get("name"):
+                validated_technologies.append({
+                    "name": tech["name"],
+                    "category": tech.get("category", "General Technology"),
+                    "relevance": max(0.0, min(1.0, float(tech.get("relevance", 0.5)))),
+                    "context": tech.get("context", "")
+                })
+
+        # Validate and normalize company entries
+        validated_companies = []
+        for company in companies:
+            if isinstance(company, dict) and company.get("name"):
+                validated_companies.append({
+                    "name": company["name"],
+                    "country": company.get("country"),
+                    "industry": company.get("industry"),
+                    "context": company.get("context", ""),
+                    "sentiment": company.get("sentiment", "neutral")
+                })
+
+        # Validate and normalize country entries
+        validated_countries = []
+        for country in countries:
+            if isinstance(country, dict) and country.get("name"):
+                validated_countries.append({
+                    "name": country["name"],
+                    "context": country.get("context", "")
+                })
+
+        return {
+            "is_technology_related": bool(is_tech),
+            "confidence": confidence,
+            "technologies": validated_technologies,
+            "companies": validated_companies,
+            "countries": validated_countries
+        }
+
     async def generate_trend_analysis(
         self,
         technologies: list[dict],

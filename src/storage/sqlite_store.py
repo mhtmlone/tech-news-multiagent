@@ -94,18 +94,71 @@ class SQLiteStore:
             )
         """)
         
-        # Article-Company-Country junction table
+        # Technologies table
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS article_entities (
+            CREATE TABLE IF NOT EXISTS technologies (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                category TEXT,
+                first_mentioned DATETIME,
+                last_mentioned DATETIME,
+                mention_count INTEGER DEFAULT 1
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_technologies_category
+            ON technologies(category)
+        """)
+        
+        # Article-Company junction table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS article_companies (
                 article_id TEXT,
                 company_id TEXT,
-                country_id TEXT,
+                relevance REAL,
                 context TEXT,
-                PRIMARY KEY (article_id, company_id, country_id),
+                PRIMARY KEY (article_id, company_id),
                 FOREIGN KEY (article_id) REFERENCES news_articles(id),
-                FOREIGN KEY (company_id) REFERENCES companies(id),
+                FOREIGN KEY (company_id) REFERENCES companies(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_article_companies_company
+            ON article_companies(company_id)
+        """)
+        
+        # Article-Country junction table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS article_countries (
+                article_id TEXT,
+                country_id TEXT,
+                relevance REAL,
+                context TEXT,
+                PRIMARY KEY (article_id, country_id),
+                FOREIGN KEY (article_id) REFERENCES news_articles(id),
                 FOREIGN KEY (country_id) REFERENCES countries(id)
             )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_article_countries_country
+            ON article_countries(country_id)
+        """)
+        
+        # Article-Technology junction table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS article_technologies (
+                article_id TEXT,
+                technology_id TEXT,
+                relevance REAL,
+                context TEXT,
+                PRIMARY KEY (article_id, technology_id),
+                FOREIGN KEY (article_id) REFERENCES news_articles(id),
+                FOREIGN KEY (technology_id) REFERENCES technologies(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_article_technologies_technology
+            ON article_technologies(technology_id)
         """)
         
         # Reports table
@@ -303,14 +356,192 @@ class SQLiteStore:
         
         return country_id
     
+    def store_technology(self, technology_data: dict) -> str:
+        """Store or update a technology.
+        
+        Args:
+            technology_data: Dictionary containing technology data.
+                Expected keys: name, category, relevance, context
+            
+        Returns:
+            The technology ID.
+        """
+        technology_id = technology_data.get("id") or str(uuid.uuid4())
+        technology_name = technology_data.get("name", "")
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Check if technology exists
+            cursor.execute("SELECT id, mention_count FROM technologies WHERE name = ?", (technology_name,))
+            row = cursor.fetchone()
+            
+            if row:
+                # Update existing technology
+                technology_id = row["id"]
+                cursor.execute("""
+                    UPDATE technologies SET
+                        category = COALESCE(?, category),
+                        last_mentioned = ?,
+                        mention_count = mention_count + 1
+                    WHERE id = ?
+                """, (
+                    technology_data.get("category"),
+                    datetime.now().isoformat(),
+                    technology_id
+                ))
+            else:
+                # Insert new technology
+                cursor.execute("""
+                    INSERT INTO technologies (id, name, category, first_mentioned, last_mentioned)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    technology_id,
+                    technology_name,
+                    technology_data.get("category", "General Technology"),
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                ))
+            conn.commit()
+        finally:
+            conn.close()
+        
+        return technology_id
+    
+    def link_article_technologies(
+        self,
+        article_id: str,
+        technology_ids: list[str],
+        technology_data: list[dict] = None
+    ):
+        """Link article with technologies.
+        
+        Args:
+            article_id: The article ID.
+            technology_ids: List of technology IDs.
+            technology_data: Optional list of dicts with relevance and context for each technology.
+                Each dict should have keys: technology_id, relevance, context
+        """
+        technology_ids = technology_ids or []
+        technology_data = technology_data or []
+        
+        # Create a lookup for technology metadata
+        tech_meta = {td.get("technology_id"): td for td in technology_data if td.get("technology_id")}
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for tech_id in technology_ids:
+                meta = tech_meta.get(tech_id, {})
+                relevance = meta.get("relevance", 0.5)
+                context = meta.get("context", "")
+                
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO article_technologies
+                        (article_id, technology_id, relevance, context)
+                        VALUES (?, ?, ?, ?)
+                    """, (article_id, tech_id, relevance, context))
+                except sqlite3.IntegrityError:
+                    pass
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def link_article_companies(
+        self,
+        article_id: str,
+        company_ids: list[str],
+        company_data: list[dict] = None
+    ):
+        """Link article with companies.
+        
+        Args:
+            article_id: The article ID.
+            company_ids: List of company IDs.
+            company_data: Optional list of dicts with relevance and context for each company.
+                Each dict should have keys: company_id, relevance, context
+        """
+        company_ids = company_ids or []
+        company_data = company_data or []
+        
+        # Create a lookup for company metadata
+        company_meta = {cd.get("company_id"): cd for cd in company_data if cd.get("company_id")}
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for company_id in company_ids:
+                meta = company_meta.get(company_id, {})
+                relevance = meta.get("relevance", 0.5)
+                context = meta.get("context", "")
+                
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO article_companies
+                        (article_id, company_id, relevance, context)
+                        VALUES (?, ?, ?, ?)
+                    """, (article_id, company_id, relevance, context))
+                except sqlite3.IntegrityError:
+                    pass
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def link_article_countries(
+        self,
+        article_id: str,
+        country_ids: list[str],
+        country_data: list[dict] = None
+    ):
+        """Link article with countries.
+        
+        Args:
+            article_id: The article ID.
+            country_ids: List of country IDs.
+            country_data: Optional list of dicts with relevance and context for each country.
+                Each dict should have keys: country_id, relevance, context
+        """
+        country_ids = country_ids or []
+        country_data = country_data or []
+        
+        # Create a lookup for country metadata
+        country_meta = {cd.get("country_id"): cd for cd in country_data if cd.get("country_id")}
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for country_id in country_ids:
+                meta = country_meta.get(country_id, {})
+                relevance = meta.get("relevance", 0.5)
+                context = meta.get("context", "")
+                
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO article_countries
+                        (article_id, country_id, relevance, context)
+                        VALUES (?, ?, ?, ?)
+                    """, (article_id, country_id, relevance, context))
+                except sqlite3.IntegrityError:
+                    pass
+            conn.commit()
+        finally:
+            conn.close()
+    
     def link_article_entities(
-        self, 
-        article_id: str, 
-        company_ids: list[str] = None, 
+        self,
+        article_id: str,
+        company_ids: list[str] = None,
         country_ids: list[str] = None,
         context: str = None
     ):
-        """Link article with companies and countries.
+        """Link article with companies and countries (legacy method for backward compatibility).
+        
+        This method is deprecated. Use link_article_companies() and link_article_countries() instead.
         
         Args:
             article_id: The article ID.
@@ -318,26 +549,11 @@ class SQLiteStore:
             country_ids: List of country IDs.
             context: Context string for the relationship.
         """
-        company_ids = company_ids or []
-        country_ids = country_ids or []
-        
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        try:
-            for company_id in company_ids:
-                for country_id in country_ids:
-                    try:
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO article_entities 
-                            (article_id, company_id, country_id, context)
-                            VALUES (?, ?, ?, ?)
-                        """, (article_id, company_id, country_id, context))
-                    except sqlite3.IntegrityError:
-                        pass
-            conn.commit()
-        finally:
-            conn.close()
+        # Use the new methods for backward compatibility
+        if company_ids:
+            self.link_article_companies(article_id, company_ids)
+        if country_ids:
+            self.link_article_countries(article_id, country_ids)
     
     def get_articles_by_date_range(
         self, 

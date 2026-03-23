@@ -1,11 +1,15 @@
-"""Entity extraction utilities for companies and countries."""
+"""Entity extraction utilities for companies, countries, and technologies."""
 
 import re
 from typing import Optional
 
 
 class EntityExtractor:
-    """Extract companies and countries from text."""
+    """Extract companies, countries, and technologies from text.
+    
+    This class provides both pattern-based extraction (using predefined dictionaries)
+    and LLM-based extraction (using the unified extract_all_entities method).
+    """
     
     # Known tech companies with country mapping
     TECH_COMPANIES = {
@@ -141,6 +145,66 @@ class EntityExtractor:
         "Saudi Arabia": ("Saudi Arabia", "Saudi", "Saudi Arabian"),
     }
     
+    # Technology categories with keywords
+    TECH_CATEGORIES = {
+        "AI/ML": [
+            "AI", "artificial intelligence", "machine learning", "deep learning",
+            "neural network", "LLM", "large language model", "transformer",
+            "diffusion model", "generative AI", "computer vision", "NLP",
+            "RAG", "agent", "multi-agent", "GPT", "Claude", "Gemini"
+        ],
+        "Quantum Computing": [
+            "quantum computing", "quantum", "qubit", "quantum supremacy"
+        ],
+        "Blockchain/Web3": [
+            "blockchain", "cryptocurrency", "web3", "crypto", "NFT", "DeFi",
+            "smart contract", "Bitcoin", "Ethereum"
+        ],
+        "Robotics": [
+            "robotics", "robot", "autonomous", "humanoid", "automation"
+        ],
+        "Cloud/Infrastructure": [
+            "cloud computing", "edge computing", "serverless", "kubernetes",
+            "microservices", "devops", "API", "AWS", "Azure", "GCP"
+        ],
+        "Cybersecurity": [
+            "cybersecurity", "zero trust", "encryption", "authentication",
+            "security", "hacking", "vulnerability"
+        ],
+        "Telecommunications": [
+            "5G", "6G", "telecommunications", "network"
+        ],
+        "IoT": [
+            "IoT", "Internet of Things", "sensor", "connected"
+        ],
+        "AR/VR/MR": [
+            "augmented reality", "virtual reality", "AR", "VR",
+            "mixed reality", "metaverse", "XR"
+        ],
+        "Biotech": [
+            "biotech", "gene editing", "CRISPR", "synthetic biology", "biomedical"
+        ],
+        "Energy/Cleantech": [
+            "battery technology", "renewable energy", "solar", "fusion",
+            "hydrogen fuel", "carbon capture", "climate tech", "electric vehicle", "EV"
+        ],
+        "Semiconductors": [
+            "semiconductor", "chip", "processor", "GPU", "TPU", "neuromorphic"
+        ],
+        "Hardware/Interfaces": [
+            "brain-computer interface", "wearable", "hardware"
+        ],
+        "Space Tech": [
+            "space technology", "satellite", "rocket", "spaceX"
+        ],
+        "Manufacturing": [
+            "3D printing", "additive manufacturing", "nanotechnology"
+        ],
+        "Materials": [
+            "material science", "graphene", "superconductor"
+        ],
+    }
+    
     # Build reverse lookup for countries
     COUNTRY_LOOKUP = {}
     for code, names in COUNTRIES.items():
@@ -170,6 +234,9 @@ class EntityExtractor:
             r"\b(" + "|".join(re.escape(name) for name in country_names) + r")\b",
             re.IGNORECASE
         )
+        
+        # Build regex patterns for technologies
+        self._build_tech_patterns()
     
     def extract_companies(self, text: str) -> list[dict]:
         """Extract company mentions from text.
@@ -361,3 +428,172 @@ class EntityExtractor:
             name for name, c in self.TECH_COMPANIES.items()
             if c == country_code or c == country
         ]
+    
+    def _build_tech_patterns(self) -> dict[str, re.Pattern]:
+        """Build regex patterns for technology keywords.
+        
+        Returns:
+            Dictionary mapping category to compiled regex pattern.
+        """
+        patterns = {}
+        for category, keywords in self.TECH_CATEGORIES.items():
+            pattern_str = r"\b(" + "|".join(re.escape(kw) for kw in keywords) + r")\b"
+            patterns[category] = re.compile(pattern_str, re.IGNORECASE)
+        return patterns
+    
+    def extract_technologies(self, text: str) -> list[dict]:
+        """Extract technology mentions from text using pattern matching.
+        
+        Args:
+            text: Text to extract technologies from.
+            
+        Returns:
+            List of technology dictionaries with name, category, and context.
+        """
+        technologies = []
+        seen = set()
+        
+        for category, pattern in self._build_tech_patterns().items():
+            matches = pattern.findall(text)
+            for match in matches:
+                # Normalize the match to get proper casing
+                tech_name = self._normalize_tech_name(match)
+                
+                if tech_name.lower() not in seen:
+                    seen.add(tech_name.lower())
+                    technologies.append({
+                        "name": tech_name,
+                        "category": category,
+                        "relevance": 0.5,  # Default relevance for pattern matches
+                        "context": self._extract_context(text, match)
+                    })
+        
+        return technologies
+    
+    def _normalize_tech_name(self, tech: str) -> str:
+        """Normalize technology name to standard form.
+        
+        Args:
+            tech: Technology name from text.
+            
+        Returns:
+            Normalized technology name.
+        """
+        # Common normalizations
+        normalizations = {
+            "ai": "AI",
+            "ml": "ML",
+            "llm": "LLM",
+            "nlp": "NLP",
+            "rag": "RAG",
+            "ar": "AR",
+            "vr": "VR",
+            "xr": "XR",
+            "iot": "IoT",
+            "ev": "EV",
+            "gpu": "GPU",
+            "tpu": "TPU",
+            "5g": "5G",
+            "6g": "6G",
+            "nft": "NFT",
+            "defi": "DeFi",
+            "web3": "Web3",
+            "crispr": "CRISPR",
+        }
+        
+        lower_tech = tech.lower()
+        if lower_tech in normalizations:
+            return normalizations[lower_tech]
+        
+        # Capitalize first letter of each word
+        return tech.title()
+    
+    def categorize_technology(self, text: str) -> str:
+        """Categorize text into a technology category.
+        
+        Args:
+            text: Text to categorize.
+            
+        Returns:
+            Category name.
+        """
+        for category, pattern in self._build_tech_patterns().items():
+            if pattern.search(text):
+                return category
+        return "General Technology"
+    
+    async def extract_all_unified(
+        self,
+        title: str,
+        content: str = "",
+        summary: str = ""
+    ) -> dict:
+        """Extract all entities (technologies, companies, countries) in a single call.
+        
+        This method uses LLM for unified extraction when available, falling back to
+        pattern-based extraction otherwise.
+        
+        Args:
+            title: Article title.
+            content: Article content (optional).
+            summary: Article summary (optional).
+            
+        Returns:
+            Dictionary with:
+            - is_technology_related: bool
+            - technologies: list of technology dicts
+            - companies: list of company dicts
+            - countries: list of country dicts
+            - confidence: float
+        """
+        # Combine text for pattern-based extraction
+        full_text = f"{title} {content} {summary}"
+        
+        # If LLM is available, use unified extraction
+        if self.use_llm and self.llm_analyzer:
+            try:
+                llm_results = await self.llm_analyzer.extract_all_entities(
+                    title=title,
+                    content=content,
+                    summary=summary
+                )
+                
+                # Merge with pattern-based results for completeness
+                pattern_companies = self.extract_companies(full_text)
+                pattern_countries = self.extract_countries(full_text)
+                pattern_technologies = self.extract_technologies(full_text)
+                
+                # Merge companies - prefer LLM results, add pattern-based for known companies
+                seen_companies = {c["name"].lower() for c in llm_results.get("companies", [])}
+                for company in pattern_companies:
+                    if company["name"].lower() not in seen_companies:
+                        llm_results["companies"].append(company)
+                        seen_companies.add(company["name"].lower())
+                
+                # Merge countries
+                seen_countries = {c["name"].lower() for c in llm_results.get("countries", [])}
+                for country in pattern_countries:
+                    if country["name"].lower() not in seen_countries:
+                        llm_results["countries"].append(country)
+                        seen_countries.add(country["name"].lower())
+                
+                # Merge technologies
+                seen_technologies = {t["name"].lower() for t in llm_results.get("technologies", [])}
+                for tech in pattern_technologies:
+                    if tech["name"].lower() not in seen_technologies:
+                        llm_results["technologies"].append(tech)
+                        seen_technologies.add(tech["name"].lower())
+                
+                return llm_results
+                
+            except Exception as e:
+                print(f"LLM unified extraction failed, falling back to patterns: {e}")
+        
+        # Fallback to pattern-based extraction
+        return {
+            "is_technology_related": bool(self.extract_technologies(full_text)),
+            "technologies": self.extract_technologies(full_text),
+            "companies": self.extract_companies(full_text),
+            "countries": self.extract_countries(full_text),
+            "confidence": 0.5  # Lower confidence for pattern-based
+        }
