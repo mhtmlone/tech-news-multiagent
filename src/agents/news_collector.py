@@ -813,7 +813,7 @@ class NewsCollectorAgent(BaseAgent):
                         logger.warning(
                             f"RSS feed parsing error for {url}: {bozo_exception}")
 
-                    for entry in feed.entries[:20]:
+                    for entry in feed.entries:
                         published = None
                         if hasattr(entry, "published_parsed") and entry.published_parsed:
                             try:
