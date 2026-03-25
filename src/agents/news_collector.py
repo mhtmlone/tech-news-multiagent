@@ -186,7 +186,7 @@ class NewsCollectorAgent(BaseAgent):
         """
         if self.verbose:
             print(f"    📄 Fetching article content: {url}")
-        
+
         # First, try to get HTML content via standard HTTP
         html_content = await self._fetch_html_content(url)
 
@@ -786,7 +786,7 @@ class NewsCollectorAgent(BaseAgent):
         await self._ensure_session()
         entries = []
         is_36kr_feed = "36kr" in url.lower()
-        
+
         if self.verbose:
             feed_progress = f"[{feed_index}/{total_feeds}]" if total_feeds > 0 else ""
             print(f"  {feed_progress} Fetching RSS feed: {url}")
@@ -913,7 +913,7 @@ class NewsCollectorAgent(BaseAgent):
         await self._ensure_session()
         all_entries = []
         total_feeds = len(self.sources)
-        
+
         if self.verbose:
             print(f"\n  📡 Fetching {total_feeds} RSS feeds...")
 
@@ -988,7 +988,7 @@ class NewsCollectorAgent(BaseAgent):
         """Check if text is technology-related using keyword matching.
 
         This is the synchronous keyword-based method. For LLM-based classification,
-        use is_technology_related_async() instead.
+        use analyze_article_relevance() instead.
 
         Args:
             text: Text to analyze for technology keywords.
@@ -1005,41 +1005,51 @@ class NewsCollectorAgent(BaseAgent):
 
         return len(matched_keywords) > 0, matched_keywords
 
-    async def is_technology_related_async(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
-        """Check if an article is technology-related using LLM or keyword matching.
+    async def analyze_article_relevance(
+        self,
+        title: str,
+        summary: str = ""
+    ) -> tuple[bool, list[str], float]:
+        """Analyze if an article is technology-related and calculate its relevance.
 
-        If LLM classification is enabled (via RSS_LLM_PROVIDER), uses the LLM
-        to analyze the article title and summary. Otherwise, falls back to
-        keyword-based matching.
+        Combines technology classification and relevance calculation into a single
+        method for efficiency. If LLM is enabled, makes a single LLM call instead
+        of two separate calls.
 
         Args:
             title: Article title to analyze.
             summary: Optional article summary for additional context.
 
         Returns:
-            Tuple of (is_tech_related: bool, tech_topics: list[str])
+            Tuple of (is_tech_related: bool, tech_topics: list[str], relevance_score: float)
         """
-        # Use LLM if available and configured
+        # Use LLM if available and configured - single call for both classification and relevance
         if self.llm_analyzer is not None:
             try:
-                is_tech, topics = await self.llm_analyzer.is_technology_related(title, summary)
+                is_tech, topics, relevance = await self.llm_analyzer.analyze_article_relevance(
+                    title, summary
+                )
                 logger.debug(
-                    f"LLM classification for '{title[:50]}...': is_tech={is_tech}, topics={topics}")
-                return is_tech, topics
+                    f"LLM analysis for '{title[:50]}...': is_tech={is_tech}, "
+                    f"topics={topics}, relevance={relevance:.2f}"
+                )
+                return is_tech, topics, relevance
             except Exception as e:
                 logger.warning(
-                    f"LLM classification failed, falling back to keywords: {e}")
+                    f"LLM analysis failed, falling back to keywords: {e}")
                 # Fall through to keyword-based matching
 
         # Fallback to keyword-based matching
         combined_text = f"{title} {summary}"
-        return self.is_technology_related(combined_text)
+        is_tech, topics = self.is_technology_related(combined_text)
+        relevance = self.calculate_relevance(combined_text, topics)
+        return is_tech, topics, relevance
 
     def calculate_relevance(self, text: str, matched_keywords: list[str]) -> float:
         """Calculate relevance score using keyword-based matching.
 
         This is the synchronous keyword-based method. For LLM-based assessment,
-        use calculate_relevance_async() instead.
+        use analyze_article_relevance() instead.
 
         Args:
             text: Text to analyze.
@@ -1061,49 +1071,6 @@ class NewsCollectorAgent(BaseAgent):
 
         score = min(score / 10.0, 1.0)
         return score
-
-    async def calculate_relevance_async(
-        self,
-        title: str,
-        content: str = "",
-        tech_topics: list[str] = None
-    ) -> float:
-        """Calculate relevance score using LLM or keyword-based matching.
-
-        If LLM classification is enabled (via RSS_LLM_PROVIDER), uses the LLM
-        to assess article relevance. Otherwise, falls back to keyword-based
-        matching.
-
-        Args:
-            title: Article title to analyze.
-            content: Optional article content or summary.
-            tech_topics: Optional list of technology topics already identified.
-
-        Returns:
-            Relevance score (0.0 to 1.0).
-        """
-        # Use LLM if available and configured
-        if self.llm_analyzer is not None:
-            try:
-                result = await self.llm_analyzer.calculate_relevance(
-                    title=title,
-                    content=content,
-                    tech_topics=tech_topics
-                )
-                score = result.get("relevance_score", 0.5)
-                logger.debug(
-                    f"LLM relevance for '{title[:50]}...': score={score:.2f}, "
-                    f"reasoning={result.get('reasoning', 'N/A')}"
-                )
-                return score
-            except Exception as e:
-                logger.warning(
-                    f"LLM relevance calculation failed, falling back to keywords: {e}")
-                # Fall through to keyword-based matching
-
-        # Fallback to keyword-based matching
-        combined_text = f"{title} {content}"
-        return self.calculate_relevance(combined_text, tech_topics or [])
 
     async def analyze_sentiment(self, text: str) -> float:
         positive_words = [
@@ -1176,21 +1143,22 @@ class NewsCollectorAgent(BaseAgent):
         entries = await self.fetch_all_feeds()
         logger.info(
             f"Fetched {len(entries)} total entries from {len(self.sources)} sources")
-        
+
         if self.verbose:
-            print(f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources")
+            print(
+                f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources")
 
         # Filter out entries with URLs that have already been collected
         entries = self.filter_new_entries(entries)
         logger.info(
             f"Processing {len(entries)} new entries after deduplication")
-        
+
         if self.verbose:
             print(f"  ✓ {len(entries)} new entries after deduplication")
 
         technology_mentions = []
         stored_article_ids = []
-        
+
         if self.verbose and entries:
             print(f"\n📰 Processing {len(entries)} articles...")
 
@@ -1199,24 +1167,21 @@ class NewsCollectorAgent(BaseAgent):
                 continue
 
             if self.verbose:
-                title_preview = entry['title'][:60] + "..." if len(entry['title']) > 60 else entry['title']
+                title_preview = entry['title'][:60] + \
+                    "..." if len(entry['title']) > 60 else entry['title']
                 print(f"  [{idx}/{len(entries)}] Analyzing: {title_preview}")
 
-            # Use LLM-based classification if available, otherwise fall back to keywords
-            is_tech, tech_topics = await self.is_technology_related_async(
+            # Use combined LLM-based analysis if available, otherwise fall back to keywords
+            is_tech, tech_topics, relevance = await self.analyze_article_relevance(
                 entry['title'], entry['summary']
             )
 
-            # Use LLM-based relevance assessment if available, otherwise fall back to keywords
-            relevance = await self.calculate_relevance_async(
-                entry['title'], entry['summary'], tech_topics
-            )
-
             sentiment = await self.analyze_sentiment(f"{entry['title']} {entry['summary']}")
-            
+
             if self.verbose:
                 if is_tech:
-                    print(f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
+                    print(
+                        f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
                 else:
                     print(f"      → Non-tech article (stored for deduplication)")
 

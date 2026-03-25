@@ -501,23 +501,29 @@ Generate geographic insights:""")
 
         return response
 
-    async def is_technology_related(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
-        """Determine if an article is technology-related using LLM.
+    async def analyze_article_relevance(
+        self,
+        title: str,
+        summary: str = ""
+    ) -> tuple[bool, list[str], float]:
+        """Analyze if an article is technology-related and calculate relevance in a single LLM call.
 
-        This method uses the LLM to analyze the article title (and optionally summary)
-        to determine if it's related to technology topics. It returns a boolean
-        indicating whether it's tech-related and a list of technology topics found.
+        This combined method is more efficient than calling is_technology_related and
+        calculate_relevance separately, as it makes only one LLM request.
 
         Args:
             title: The article title to analyze.
             summary: Optional article summary for additional context.
 
         Returns:
-            Tuple of (is_tech_related: bool, tech_topics: list[str])
+            Tuple of (is_tech_related: bool, tech_topics: list[str], relevance_score: float)
         """
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology news classifier. Analyze the given article title and summary 
-            to determine if it is related to technology topics.
+            ("system", """You are a technology news classifier and relevance assessor. Analyze the given
+            article title and summary to:
+            1. Determine if it is related to technology topics
+            2. Identify the technology topics mentioned
+            3. Assess the relevance score for technology readers
             
             Technology topics include but are not limited to:
             - Artificial Intelligence, Machine Learning, Deep Learning, LLMs
@@ -538,9 +544,16 @@ Generate geographic insights:""")
             - IoT, smart devices
             - Electric vehicles, autonomous vehicles
             
+            Relevance scoring guidelines:
+            - 0.0-0.2: Technology mentioned only in passing, not the main focus
+            - 0.3-0.5: Technology is discussed but not deeply, or is peripheral to main topic
+            - 0.6-0.8: Technology is a significant focus, good depth of coverage
+            - 0.9-1.0: Deep technology analysis, breaking news, or highly significant development
+            
             Return a JSON object with these keys:
             - is_technology_related (boolean): true if the article is about technology
             - tech_topics (list of strings): technology topics mentioned in the article
+            - relevance_score (float 0-1): overall relevance to technology
             - confidence (float 0-1): confidence level of the classification"""),
             ("user", """Article Title: {title}
 Article Summary: {summary}
@@ -557,12 +570,41 @@ Analyze and return JSON:""")
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
         topics = result.get("tech_topics", [])
+        relevance = result.get("relevance_score", 0.5)
 
         # Ensure is_tech is a boolean
         if isinstance(is_tech, str):
             is_tech = is_tech.lower() in ("true", "yes", "1")
 
-        return bool(is_tech), topics
+        # Ensure relevance is a float in valid range
+        if isinstance(relevance, str):
+            try:
+                relevance = float(relevance)
+            except ValueError:
+                relevance = 0.5
+        relevance = max(0.0, min(1.0, float(relevance)))
+
+        return bool(is_tech), topics, relevance
+
+    async def is_technology_related(self, title: str, summary: str = "") -> tuple[bool, list[str]]:
+        """Determine if an article is technology-related using LLM.
+
+        This method uses the LLM to analyze the article title (and optionally summary)
+        to determine if it's related to technology topics. It returns a boolean
+        indicating whether it's tech-related and a list of technology topics found.
+
+        Note: For better efficiency, consider using analyze_article_relevance() which
+        combines this with relevance calculation in a single LLM call.
+
+        Args:
+            title: The article title to analyze.
+            summary: Optional article summary for additional context.
+
+        Returns:
+            Tuple of (is_tech_related: bool, tech_topics: list[str])
+        """
+        is_tech, topics, _ = await self.analyze_article_relevance(title, summary)
+        return is_tech, topics
 
     async def calculate_relevance(
         self,
@@ -575,6 +617,9 @@ Analyze and return JSON:""")
         This method uses the LLM to assess how relevant an article is to technology
         topics, considering factors like depth of coverage, significance, and
         technology focus.
+
+        Note: For better efficiency, consider using analyze_article_relevance() which
+        combines technology classification with relevance calculation in a single LLM call.
 
         Args:
             title: The article title.
