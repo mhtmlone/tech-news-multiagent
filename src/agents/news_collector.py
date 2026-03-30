@@ -136,6 +136,7 @@ class NewsCollectorAgent(BaseAgent):
         if LLMConfig.is_enabled():
             from ..utils.llm_analyzer import LLMAnalyzer
             llm_kwargs = LLMConfig.create_llm_kwargs("news_collector")
+            llm_kwargs["verbose"] = self.verbose
             self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
             logger.info(
                 f"LLM-based technology classification enabled: "

@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from typing import Optional
 
 from langchain_openai import ChatOpenAI
@@ -18,7 +19,8 @@ class LLMAnalyzer:
         api_key: Optional[str] = None,
         temperature: float = 0.7,
         base_url: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        verbose: bool = False
     ):
         """Initialize the LLM analyzer.
 
@@ -28,6 +30,7 @@ class LLMAnalyzer:
             temperature: Temperature for LLM responses.
             base_url: Base URL for API (for OpenRouter or custom endpoints).
             model: Alternative parameter for model name (takes precedence over model_name).
+            verbose: If True, print timing information for all LLM calls.
         """
         # Use model parameter if provided, otherwise fall back to model_name
         effective_model = model or model_name
@@ -45,6 +48,33 @@ class LLMAnalyzer:
 
         self.llm = ChatOpenAI(**llm_kwargs)
         self.output_parser = StrOutputParser()
+        self.verbose = verbose
+        self._model_name = effective_model
+        if verbose:
+            print(f"    ⏱️  LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})")
+
+    async def _timed_invoke(self, chain, inputs: dict, operation_name: str = "LLM call"):
+        """Execute an LLM call with timing measurement.
+
+        Args:
+            chain: The LangChain chain to execute.
+            inputs: Input dictionary for the chain.
+            operation_name: Human-readable name for the operation (for logging).
+
+        Returns:
+            The response from the chain.
+        """
+        if self.verbose:
+            print(f"    ⏱️  LLM call starting: {operation_name} (model: {self._model_name})")
+            start_time = time.perf_counter()
+
+        response = await chain.ainvoke(inputs)
+
+        if self.verbose:
+            elapsed = time.perf_counter() - start_time
+            print(f"    ⏱️  LLM call completed: {operation_name} ({elapsed:.2f}s)")
+
+        return response
 
     def _format_articles_for_prompt(self, articles: list[dict]) -> str:
         """Format articles for inclusion in prompts.
@@ -140,10 +170,10 @@ Generate an executive summary:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "articles": self._format_articles_for_prompt(articles),
             "technologies": self._format_technologies_for_prompt(technologies)
-        })
+        }, "generate_executive_summary")
 
         return response
 
@@ -185,11 +215,11 @@ Analyze the significance and return JSON:""")
         chain = prompt | self.llm | self.output_parser
         # Use full content if available, otherwise fall back to summary
         content = article.get("content", "") or article.get("summary", "")
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "title": article.get("title", ""),
             "content": content[:2000],  # Use more content for better analysis
             "technologies": ", ".join([t.get("name", "") for t in related_technologies])
-        })
+        }, "analyze_significance")
 
         result = self._parse_json_response(response)
         result["article_title"] = article.get("title", "")
@@ -217,7 +247,7 @@ Extract entities and return JSON:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({"text": text[:2000]})
+        response = await self._timed_invoke(chain, {"text": text[:2000]}, "extract_entities_with_context")
 
         result = self._parse_json_response(response)
         return {
@@ -314,10 +344,10 @@ Extract all entities and return JSON:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "title": title,
             "content": full_text[:2500]  # Limit total text length
-        })
+        }, "extract_all_entities")
 
         result = self._parse_json_response(response)
 
@@ -412,10 +442,10 @@ Generate a comprehensive trend analysis:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "technologies": self._format_technologies_for_prompt(technologies),
             "articles": self._format_articles_for_prompt(articles[:15])
-        })
+        }, "generate_trend_analysis")
 
         return response
 
@@ -453,9 +483,9 @@ Generate a market impact summary:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "analyses": "\n".join(analyses_text)
-        })
+        }, "generate_market_impact_summary")
 
         return response
 
@@ -495,9 +525,9 @@ Generate geographic insights:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "countries": "\n".join(countries_text)
-        })
+        }, "generate_geographic_insights")
 
         return response
 
@@ -562,10 +592,10 @@ Analyze and return JSON:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "title": title,
             "summary": summary[:500] if summary else "N/A"
-        })
+        }, "analyze_article_relevance")
 
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
@@ -675,23 +705,23 @@ Analyze and return JSON:""")
                  * technology_implications (string description)
                - market_impact_summary: overall synthesis of market impacts (1-2 paragraphs)
 
-            Return a JSON object with this exact structure:
-            {
-                "executive_summary": "string (2-3 paragraphs)",
-                "trend_analysis": "string (structured markdown with sections)",
-                "geographic_insights": "string (1-2 paragraphs)",
-                "significance_analysis": {
-                    "top_articles": [
-                        {
-                            "title": "string",
-                            "significance_score": float,
-                            "market_impact": "string",
-                            "technology_implications": "string"
-                        }
-                    ],
-                    "market_impact_summary": "string (1-2 paragraphs)"
-                }
-            }"""),
+           Return a JSON object with this exact structure:
+           {{
+               "executive_summary": "string (2-3 paragraphs)",
+               "trend_analysis": "string (structured markdown with sections)",
+               "geographic_insights": "string (1-2 paragraphs)",
+               "significance_analysis": {{
+                   "top_articles": [
+                       {{
+                           "title": "string",
+                           "significance_score": float,
+                           "market_impact": "string",
+                           "technology_implications": "string"
+                       }}
+                   ],
+                   "market_impact_summary": "string (1-2 paragraphs)"
+               }}
+           }}"""),
             ("user", """Articles (most recent):
 {articles}
 
@@ -711,13 +741,13 @@ Generate the complete report analysis as JSON:""")
         ])
 
         chain = prompt | self.llm | self.output_parser
-        response = await chain.ainvoke({
+        response = await self._timed_invoke(chain, {
             "articles": articles_text,
             "technologies": technologies_text,
             "companies": companies_text or "No company data available",
             "countries": countries_text or "No country data available",
             "high_relevance_articles": high_relevance_text
-        })
+        }, "generate_complete_report")
 
         result = self._parse_json_response(response)
         

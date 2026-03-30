@@ -95,6 +95,10 @@ class TechNewsMultiAgentSystem:
         
         # Set verbose mode on news collector for detailed progress
         self.news_collector.verbose = verbose
+        if self.news_collector.llm_analyzer:
+            self.news_collector.llm_analyzer.verbose = verbose
+            if verbose:
+                console.print("    [dim]⏱️  LLM timing enabled for news collector[/dim]")
         news_mentions = await self.news_collector.process(
             {"max_age_days": max_age_days, "sources": sources}
         )
@@ -167,6 +171,13 @@ class TechNewsMultiAgentSystem:
         if generate_report:
             if verbose:
                 console.print("\n[bold]Step 5/5:[/bold] Generating report...")
+            
+            # Set verbose mode on report generator for LLM timing output
+            self.report_generator.verbose = verbose
+            if self.report_generator.llm_analyzer:
+                self.report_generator.llm_analyzer.verbose = verbose
+                if verbose:
+                    console.print("    [dim]⏱️  LLM timing enabled for report generator[/dim]")
             
             all_technologies = (
                 analysis_result["new_technologies"] + 

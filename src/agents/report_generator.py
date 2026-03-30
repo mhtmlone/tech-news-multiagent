@@ -22,6 +22,7 @@ class ReportGeneratorAgent(BaseAgent):
         llm_analyzer: LLMAnalyzer = None,
         report_dir: str = "./reports",
         use_llm: bool = True,
+        verbose: bool = False,
         **kwargs
     ):
         """Initialize the report generator agent.
@@ -31,12 +32,14 @@ class ReportGeneratorAgent(BaseAgent):
             llm_analyzer: LLM analyzer for intelligent analysis.
             report_dir: Directory to save reports.
             use_llm: Whether to use LLM for enhanced analysis.
+            verbose: If True, print timing information for LLM calls.
             **kwargs: Additional arguments for BaseAgent.
         """
         super().__init__(name="ReportGeneratorAgent", **kwargs)
         self.sqlite_store = sqlite_store or SQLiteStore()
         self.llm_analyzer = llm_analyzer
         self.use_llm = use_llm
+        self.verbose = verbose
         self.report_dir = Path(report_dir)
         self.report_dir.mkdir(parents=True, exist_ok=True)
         
@@ -44,6 +47,7 @@ class ReportGeneratorAgent(BaseAgent):
             try:
                 # Initialize LLM with configuration from LLMConfig
                 llm_kwargs = LLMConfig.create_llm_kwargs("report_generator")
+                llm_kwargs["verbose"] = self.verbose
                 self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
             except Exception as e:
                 print(f"Warning: Could not initialize LLM analyzer: {e}")
