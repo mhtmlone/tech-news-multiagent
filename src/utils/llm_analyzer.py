@@ -586,3 +586,149 @@ Analyze and return JSON:""")
 
         return bool(is_tech), topics, relevance
 
+    async def generate_complete_report(
+        self,
+        articles: list[dict],
+        technologies: list[dict],
+        top_companies: list[dict],
+        top_countries: list[dict]
+    ) -> dict:
+        """Generate all report sections in a single LLM call.
+
+        This unified method is more efficient than calling individual generation
+        methods separately, as it makes only one LLM request for the entire report.
+
+        Args:
+            articles: List of article dictionaries.
+            technologies: List of technology dictionaries.
+            top_companies: List of top companies with mention counts.
+            top_countries: List of top countries with mention counts.
+
+        Returns:
+            Dictionary containing all report sections:
+            - executive_summary: str
+            - trend_analysis: str
+            - geographic_insights: str
+            - significance_analysis: dict with top_articles and market_impact_summary
+        """
+        # Format articles for prompt (limit to top 20 for context window)
+        articles_text = self._format_articles_for_prompt(articles[:20])
+        
+        # Format technologies
+        technologies_text = self._format_technologies_for_prompt(technologies[:15])
+        
+        # Format companies
+        companies_text = ""
+        if top_companies:
+            companies_text = "\n".join([
+                f"- {c.get('name', 'Unknown')} ({c.get('country', 'N/A')}): {c.get('mention_count', 0)} mentions"
+                for c in top_companies[:10]
+            ])
+        
+        # Format countries
+        countries_text = ""
+        if top_countries:
+            countries_text = "\n".join([
+                f"- {c.get('name', 'Unknown')}: {c.get('mention_count', 0)} mentions"
+                for c in top_countries[:10]
+            ])
+        
+        # Get top 5 high-relevance articles for significance analysis
+        high_relevance_articles = sorted(
+            articles,
+            key=lambda x: x.get("relevance_score", 0),
+            reverse=True
+        )[:5]
+        
+        high_relevance_text = "\n".join([
+            f"{i+1}. {a.get('title', 'N/A')}\n"
+            f"   Relevance: {a.get('relevance_score', 0):.2f}, "
+            f"Sentiment: {a.get('sentiment_score', 0):.2f}\n"
+            f"   Content: {(a.get('content', '') or a.get('summary', ''))[:300]}{'...' if len(a.get('content', '') or a.get('summary', '')) > 300 else ''}"
+            for i, a in enumerate(high_relevance_articles)
+        ])
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a comprehensive technology news analyst. Generate a complete report analysis 
+            in a single response. You must provide ALL of the following sections in a structured JSON format:
+
+            1. EXECUTIVE SUMMARY (2-3 paragraphs):
+               - Key trends and patterns from the articles
+               - Significant developments in the technology landscape
+               - Market implications and overall sentiment
+
+            2. TREND ANALYSIS (structured analysis):
+               - Emerging trends (what's gaining momentum)
+               - Declining technologies (what's losing attention)
+               - Cross-technology synergies (how technologies connect)
+               - Market opportunities (potential growth areas)
+
+            3. GEOGRAPHIC INSIGHTS (1-2 paragraphs):
+               - Regional technology hubs and their focus areas
+               - Emerging markets and geographic shifts
+               - Key countries driving technology development
+
+            4. SIGNIFICANCE ANALYSIS:
+               - For each of the top 5 high-relevance articles, provide:
+                 * significance_score (float 0-1)
+                 * market_impact (string description)
+                 * technology_implications (string description)
+               - market_impact_summary: overall synthesis of market impacts (1-2 paragraphs)
+
+            Return a JSON object with this exact structure:
+            {
+                "executive_summary": "string (2-3 paragraphs)",
+                "trend_analysis": "string (structured markdown with sections)",
+                "geographic_insights": "string (1-2 paragraphs)",
+                "significance_analysis": {
+                    "top_articles": [
+                        {
+                            "title": "string",
+                            "significance_score": float,
+                            "market_impact": "string",
+                            "technology_implications": "string"
+                        }
+                    ],
+                    "market_impact_summary": "string (1-2 paragraphs)"
+                }
+            }"""),
+            ("user", """Articles (most recent):
+{articles}
+
+Technologies Tracked:
+{technologies}
+
+Top Companies:
+{companies}
+
+Top Countries:
+{countries}
+
+High-Relevance Articles for Significance Analysis:
+{high_relevance_articles}
+
+Generate the complete report analysis as JSON:""")
+        ])
+
+        chain = prompt | self.llm | self.output_parser
+        response = await chain.ainvoke({
+            "articles": articles_text,
+            "technologies": technologies_text,
+            "companies": companies_text or "No company data available",
+            "countries": countries_text or "No country data available",
+            "high_relevance_articles": high_relevance_text
+        })
+
+        result = self._parse_json_response(response)
+        
+        # Validate and provide defaults for missing sections
+        return {
+            "executive_summary": result.get("executive_summary", ""),
+            "trend_analysis": result.get("trend_analysis", ""),
+            "geographic_insights": result.get("geographic_insights", ""),
+            "significance_analysis": result.get("significance_analysis", {
+                "top_articles": [],
+                "market_impact_summary": ""
+            })
+        }
+

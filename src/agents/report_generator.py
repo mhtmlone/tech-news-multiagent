@@ -90,14 +90,22 @@ class ReportGeneratorAgent(BaseAgent):
         
         # Generate report components
         title = self._generate_title(articles, technologies, period_start, period_end)
-        executive_summary = await self._generate_executive_summary(articles, technologies)
-        sections = await self._generate_sections(
-            articles, technologies, developments, top_companies, top_countries
+        
+        # Single LLM call to generate all report content (if LLM is enabled)
+        llm_report_data = await self._generate_report_with_single_llm_call(
+            articles, technologies, top_companies, top_countries
+        )
+        
+        executive_summary = llm_report_data.get("executive_summary") or self._generate_template_summary(articles, technologies)
+        sections = self._build_sections_from_llm_data(
+            llm_report_data, articles, technologies, developments, top_companies, top_countries
         )
         notable_technologies = self._get_notable_technologies(technologies)
         key_companies = self._format_companies(top_companies, articles)
         key_countries = self._format_countries(top_countries)
-        significance_analysis = await self._analyze_significance(articles, technologies)
+        significance_analysis = self._build_significance_from_llm_data(
+            llm_report_data, articles, technologies
+        )
         
         # Create report object
         report = GeneratedReport(
@@ -142,6 +150,211 @@ class ReportGeneratorAgent(BaseAgent):
         
         return report
     
+    async def _generate_report_with_single_llm_call(
+        self,
+        articles: list[dict],
+        technologies: list,
+        top_companies: list[dict],
+        top_countries: list[dict]
+    ) -> dict:
+        """Generate all report content with a single LLM call.
+        
+        This is the optimized approach that reduces LLM calls from ~9 to 1.
+        
+        Args:
+            articles: List of article dictionaries.
+            technologies: List of technology data.
+            top_companies: List of top companies.
+            top_countries: List of top countries.
+            
+        Returns:
+            Dictionary with all LLM-generated report sections.
+        """
+        if not self.use_llm or not self.llm_analyzer or not articles:
+            return {}
+        
+        try:
+            tech_dicts = [t if isinstance(t, dict) else t.model_dump() for t in technologies]
+            return await self.llm_analyzer.generate_complete_report(
+                articles, tech_dicts, top_companies, top_countries
+            )
+        except Exception as e:
+            print(f"LLM report generation failed: {e}")
+            return {}
+    
+    def _build_sections_from_llm_data(
+        self,
+        llm_data: dict,
+        articles: list[dict],
+        technologies: list,
+        developments: dict,
+        top_companies: list[dict],
+        top_countries: list[dict]
+    ) -> list[ReportSection]:
+        """Build report sections from LLM-generated data with fallbacks.
+        
+        Args:
+            llm_data: Dictionary from single LLM call.
+            articles: List of articles.
+            technologies: List of technologies.
+            developments: Development tracking data.
+            top_companies: Top companies data.
+            top_countries: Top countries data.
+            
+        Returns:
+            List of ReportSection objects.
+        """
+        sections = []
+        
+        # Technology Trends Section - use LLM data or fallback
+        trends_content = llm_data.get("trend_analysis")
+        if not trends_content:
+            trends_content = self._generate_fallback_trends(technologies)
+        sections.append(ReportSection(
+            title="Technology Trends",
+            content=trends_content,
+            priority=1
+        ))
+        
+        # Key Developments Section - template-based (no LLM needed)
+        developments_content = self._generate_developments_section(technologies, developments)
+        sections.append(ReportSection(
+            title="Key Developments",
+            content=developments_content,
+            priority=2
+        ))
+        
+        # Companies Section - template-based (no LLM needed)
+        companies_content = self._generate_companies_section(top_companies)
+        sections.append(ReportSection(
+            title="Companies in Focus",
+            content=companies_content,
+            priority=3
+        ))
+        
+        # Geographic Insights Section - use LLM data or fallback
+        geo_content = llm_data.get("geographic_insights")
+        if not geo_content:
+            geo_content = self._generate_geographic_section(top_countries)
+        sections.append(ReportSection(
+            title="Geographic Insights",
+            content=geo_content,
+            priority=4
+        ))
+        
+        # Significance Analysis Section - use LLM data or fallback
+        significance_content = self._build_significance_section_from_llm_data(
+            llm_data, articles, technologies
+        )
+        sections.append(ReportSection(
+            title="Significance Analysis",
+            content=significance_content,
+            priority=5
+        ))
+        
+        # Sort by priority
+        sections.sort(key=lambda x: x.priority)
+        return sections
+    
+    def _generate_fallback_trends(self, technologies: list) -> str:
+        """Generate fallback trends section when LLM data is not available."""
+        if not technologies:
+            return "No significant technology trends identified in this period."
+        
+        content = "### Identified Technologies\n\n"
+        for tech in technologies[:10]:
+            if isinstance(tech, dict):
+                name = tech.get("name", "Unknown")
+                category = tech.get("category", "General")
+                status = tech.get("status", "emerging")
+                trend = tech.get("trend_direction", "stable")
+            else:
+                name = tech.name
+                category = tech.category
+                status = tech.status.value if hasattr(tech.status, "value") else tech.status
+                trend = tech.trend_direction
+            
+            content += f"- **{name}** ({category}) - Status: {status}, Trend: {trend}\n"
+        
+        return content
+    
+    def _build_significance_section_from_llm_data(
+        self,
+        llm_data: dict,
+        articles: list[dict],
+        technologies: list
+    ) -> str:
+        """Build significance section from LLM data with fallback."""
+        if not articles:
+            return "No articles to analyze for significance."
+        
+        content = "### Market Impact Analysis\n\n"
+        
+        # Get high-relevance articles
+        high_relevance = sorted(
+            articles,
+            key=lambda x: x.get("relevance_score", 0),
+            reverse=True
+        )[:5]
+        
+        # Try to use LLM-generated significance data
+        sig_data = llm_data.get("significance_analysis", {})
+        top_articles_analysis = sig_data.get("top_articles", [])
+        
+        if top_articles_analysis:
+            for analysis in top_articles_analysis:
+                content += f"**{analysis.get('title', 'Unknown')}**\n"
+                content += f"- Significance Score: {analysis.get('significance_score', 0):.2f}\n"
+                content += f"- Market Impact: {analysis.get('market_impact', 'N/A')}\n"
+                content += f"- Technology Implications: {analysis.get('technology_implications', 'N/A')}\n\n"
+            
+            market_summary = sig_data.get("market_impact_summary", "")
+            if market_summary:
+                content += f"**Summary:** {market_summary}\n"
+        else:
+            # Fallback to template-based analysis
+            content += self._generate_template_significance(high_relevance)
+        
+        return content
+    
+    def _build_significance_from_llm_data(
+        self,
+        llm_data: dict,
+        articles: list[dict],
+        technologies: list
+    ) -> dict:
+        """Build significance analysis dict from LLM data with fallback."""
+        if not articles:
+            return {}
+        
+        # Get top articles by relevance
+        top_articles = sorted(
+            articles,
+            key=lambda x: x.get("relevance_score", 0),
+            reverse=True
+        )[:10]
+        
+        result = {
+            "total_articles": len(articles),
+            "high_relevance_count": len([a for a in articles if a.get("relevance_score", 0) > 0.5]),
+            "average_sentiment": sum(a.get("sentiment_score", 0) for a in articles) / len(articles) if articles else 0,
+            "top_articles": [
+                {
+                    "title": a.get("title", ""),
+                    "relevance_score": a.get("relevance_score", 0),
+                    "sentiment_score": a.get("sentiment_score", 0),
+                }
+                for a in top_articles
+            ],
+        }
+        
+        # Add LLM-generated market impact summary if available
+        sig_data = llm_data.get("significance_analysis", {})
+        if sig_data.get("market_impact_summary"):
+            result["market_impact_summary"] = sig_data["market_impact_summary"]
+        
+        return result
+    
     def _generate_title(
         self, 
         articles: list[dict], 
@@ -152,24 +365,6 @@ class ReportGeneratorAgent(BaseAgent):
         """Generate report title."""
         date_range = f"{period_start.strftime('%Y-%m-%d')} to {period_end.strftime('%Y-%m-%d')}"
         return f"Technology News Analysis Report\n**Period:** {date_range}"
-    
-    async def _generate_executive_summary(
-        self, 
-        articles: list[dict], 
-        technologies: list
-    ) -> str:
-        """Generate executive summary using LLM if available."""
-        if self.use_llm and self.llm_analyzer and articles:
-            try:
-                return await self.llm_analyzer.generate_executive_summary(
-                    articles, 
-                    [t if isinstance(t, dict) else t.model_dump() for t in technologies]
-                )
-            except Exception as e:
-                print(f"LLM summary generation failed: {e}")
-        
-        # Fallback to template-based summary
-        return self._generate_template_summary(articles, technologies)
     
     def _generate_template_summary(
         self,
@@ -253,106 +448,6 @@ class ReportGeneratorAgent(BaseAgent):
         sorted_themes = sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)[:5]
         return "\n".join([f"- {theme}" for theme, _ in sorted_themes])
     
-    async def _generate_sections(
-        self,
-        articles: list[dict],
-        technologies: list,
-        developments: dict,
-        top_companies: list[dict],
-        top_countries: list[dict]
-    ) -> list[ReportSection]:
-        """Generate report sections."""
-        sections = []
-        
-        # Technology Trends Section
-        trends_content = await self._generate_trends_section(articles, technologies)
-        sections.append(ReportSection(
-            title="Technology Trends",
-            content=trends_content,
-            priority=1
-        ))
-        
-        # Key Developments Section
-        developments_content = self._generate_developments_section(technologies, developments)
-        sections.append(ReportSection(
-            title="Key Developments",
-            content=developments_content,
-            priority=2
-        ))
-        
-        # Companies Section
-        companies_content = self._generate_companies_section(top_companies)
-        sections.append(ReportSection(
-            title="Companies in Focus",
-            content=companies_content,
-            priority=3
-        ))
-        
-        # Geographic Insights Section
-        if self.use_llm and self.llm_analyzer and top_countries:
-            try:
-                geo_content = await self.llm_analyzer.generate_geographic_insights(
-                    top_countries, articles
-                )
-            except Exception:
-                geo_content = self._generate_geographic_section(top_countries)
-        else:
-            geo_content = self._generate_geographic_section(top_countries)
-        
-        sections.append(ReportSection(
-            title="Geographic Insights",
-            content=geo_content,
-            priority=4
-        ))
-        
-        # Significance Analysis Section
-        significance_content = await self._generate_significance_section(articles, technologies)
-        sections.append(ReportSection(
-            title="Significance Analysis",
-            content=significance_content,
-            priority=5
-        ))
-        
-        # Sort by priority
-        sections.sort(key=lambda x: x.priority)
-        return sections
-    
-    async def _generate_trends_section(
-        self, 
-        articles: list[dict], 
-        technologies: list
-    ) -> str:
-        """Generate technology trends section."""
-        if self.use_llm and self.llm_analyzer and articles:
-            try:
-                return await self.llm_analyzer.generate_trend_analysis(
-                    [t if isinstance(t, dict) else t.model_dump() for t in technologies],
-                    articles
-                )
-            except Exception as e:
-                print(f"LLM trend analysis failed: {e}")
-        
-        # Fallback to template
-        if not technologies:
-            return "No significant technology trends identified in this period."
-        
-        content = "### Identified Technologies\n\n"
-        for tech in technologies[:10]:
-            if isinstance(tech, dict):
-                name = tech.get("name", "Unknown")
-                category = tech.get("category", "General")
-                status = tech.get("status", "emerging")
-                trend = tech.get("trend_direction", "stable")
-            else:
-                name = tech.name
-                category = tech.category
-                status = tech.status.value if hasattr(tech.status, "value") else tech.status
-                trend = tech.trend_direction
-            
-            content += f"- **{name}** ({category}) - Status: {status}, Trend: {trend}\n"
-        
-        return content
-    
     def _generate_developments_section(
         self, 
         technologies: list, 
@@ -433,54 +528,6 @@ class ReportGeneratorAgent(BaseAgent):
         
         return content
     
-    async def _generate_significance_section(
-        self, 
-        articles: list[dict], 
-        technologies: list
-    ) -> str:
-        """Generate significance analysis section."""
-        if not articles:
-            return "No articles to analyze for significance."
-        
-        content = "### Market Impact Analysis\n\n"
-        
-        # Get high-relevance articles
-        high_relevance = sorted(
-            articles, 
-            key=lambda x: x.get("relevance_score", 0), 
-            reverse=True
-        )[:5]
-        
-        if self.use_llm and self.llm_analyzer:
-            try:
-                # Analyze significance of top articles
-                analyses = []
-                for article in high_relevance:
-                    analysis = await self.llm_analyzer.analyze_significance(
-                        article, 
-                        [t if isinstance(t, dict) else t.model_dump() for t in technologies]
-                    )
-                    analyses.append(analysis)
-                
-                for analysis in analyses:
-                    content += f"**{analysis.get('article_title', 'Unknown')}**\n"
-                    content += f"- Significance Score: {analysis.get('significance_score', 0):.2f}\n"
-                    content += f"- Market Impact: {analysis.get('market_impact', 'N/A')}\n"
-                    content += f"- Technology Implications: {analysis.get('technology_implications', 'N/A')}\n\n"
-                
-                # Generate market impact summary
-                if analyses:
-                    summary = await self.llm_analyzer.generate_market_impact_summary(analyses)
-                    content += f"**Summary:** {summary}\n"
-                    
-            except Exception as e:
-                print(f"LLM significance analysis failed: {e}")
-                content += self._generate_template_significance(high_relevance)
-        else:
-            content += self._generate_template_significance(high_relevance)
-        
-        return content
-    
     def _generate_template_significance(self, articles: list[dict]) -> str:
         """Generate template-based significance analysis using article content."""
         content = ""
@@ -530,38 +577,6 @@ class ReportGeneratorAgent(BaseAgent):
             }
             for c in countries[:10]
         ]
-    
-    async def _analyze_significance(
-        self, 
-        articles: list[dict], 
-        technologies: list
-    ) -> dict:
-        """Perform significance analysis."""
-        if not articles:
-            return {}
-        
-        # Get top articles by relevance
-        top_articles = sorted(
-            articles, 
-            key=lambda x: x.get("relevance_score", 0), 
-            reverse=True
-        )[:10]
-        
-        result = {
-            "total_articles": len(articles),
-            "high_relevance_count": len([a for a in articles if a.get("relevance_score", 0) > 0.5]),
-            "average_sentiment": sum(a.get("sentiment_score", 0) for a in articles) / len(articles) if articles else 0,
-            "top_articles": [
-                {
-                    "title": a.get("title", ""),
-                    "relevance_score": a.get("relevance_score", 0),
-                    "sentiment_score": a.get("sentiment_score", 0),
-                }
-                for a in top_articles
-            ],
-        }
-        
-        return result
     
     def _save_report(self, report: GeneratedReport) -> Path:
         """Save report as markdown file.
