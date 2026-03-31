@@ -14,6 +14,10 @@ Environment Variables:
     REPORT_GENERATOR_LLM_MODEL: Model for report generator agent
     ENTITY_EXTRACTOR_LLM_MODEL: Model for entity extraction
     TECHNOLOGY_ANALYZER_LLM_MODEL: Model for technology analyzer
+    
+    Fallback model configuration (for 40x errors):
+    LLM_FALLBACK_MODEL: Fallback model for all LLM calls when primary model fails
+    LLM_FALLBACK_BASE_URL: Fallback base URL for API calls (optional)
 """
 
 import os
@@ -52,6 +56,27 @@ class LLMConfig:
         "report_generator": "REPORT_GENERATOR_LLM_MODEL",
         "entity_extractor": "ENTITY_EXTRACTOR_LLM_MODEL",
         "technology_analyzer": "TECHNOLOGY_ANALYZER_LLM_MODEL",
+    }
+    
+    # LLMAnalyzer function-specific model env var names
+    FUNCTION_MODEL_VARS = {
+        "executive_summary": "LLM_EXECUTIVE_SUMMARY_MODEL",
+        "significance": "LLM_SIGNIFICANCE_MODEL",
+        "extract_entities": "LLM_EXTRACT_ENTITIES_MODEL",
+        "extract_entities_with_context": "LLM_EXTRACT_ENTITIES_MODEL",
+        "extract_all_entities": "LLM_EXTRACT_ENTITIES_MODEL",
+        "trend_analysis": "LLM_TREND_ANALYSIS_MODEL",
+        "market_impact_summary": "LLM_MARKET_IMPACT_MODEL",
+        "geographic_insights": "LLM_GEOGRAPHIC_INSIGHTS_MODEL",
+        "article_relevance": "LLM_ARTICLE_RELEVANCE_MODEL",
+        "complete_report": "LLM_COMPLETE_REPORT_MODEL",
+    }
+    
+    # Fallback models for 40x errors (provider-specific defaults)
+    FALLBACK_MODELS = {
+        "openrouter": "anthropic/claude-3-haiku",
+        "openai": "gpt-4o-mini",
+        "anthropic": "claude-3-haiku-20240307",
     }
     
     @classmethod
@@ -176,6 +201,81 @@ class LLMConfig:
         
         # Fall back to default model for provider
         return cls.get_default_model()
+    
+    @classmethod
+    def get_function_model(cls, function_name: str) -> Optional[str]:
+        """Get the model for a specific LLMAnalyzer function.
+        
+        Each function can have its own model configured via environment
+        variables. If not set, returns None to use the default model.
+        
+        Args:
+            function_name: Function name (e.g., "executive_summary", "significance").
+            
+        Returns:
+            Model name for the function or None if not configured.
+        """
+        env_var = cls.FUNCTION_MODEL_VARS.get(function_name)
+        if env_var:
+            model = os.getenv(env_var, "")
+            if model:
+                return model
+        return None
+    
+    @classmethod
+    def get_fallback_model(cls) -> str:
+        """Get the fallback model for 40x error retries.
+        
+        Fallback model is used when the primary model returns a 40x error.
+        If not configured via environment variable, uses provider-specific defaults.
+        
+        Returns:
+            Fallback model name.
+        """
+        # Check for global fallback model
+        model = os.getenv("LLM_FALLBACK_MODEL", "")
+        if model:
+            return model
+        
+        # Fall back to provider-specific default fallback
+        provider = cls.get_provider()
+        return cls.FALLBACK_MODELS.get(provider, "gpt-4o-mini")
+    
+    @classmethod
+    def get_fallback_base_url(cls) -> Optional[str]:
+        """Get the fallback base URL for 40x error retries.
+        
+        Fallback base URL is used when the primary model returns a 40x error.
+        If not configured via environment variable, uses the primary base URL.
+        
+        Returns:
+            Fallback base URL or None to use the primary base URL.
+        """
+        # Check for global fallback base URL
+        fallback_url = os.getenv("LLM_FALLBACK_BASE_URL", "")
+        if fallback_url:
+            return fallback_url
+        
+        # Fall back to the primary base URL (None means use default)
+        return None
+    
+    @classmethod
+    def get_fallback_api_key(cls) -> Optional[str]:
+        """Get the fallback API key for 40x error retries.
+        
+        Fallback API key is used when the primary model returns a 40x error.
+        If not configured via environment variable, uses the primary API key.
+        
+        Returns:
+            Fallback API key or None to use the primary API key.
+        """
+        # Check for global fallback API key
+        fallback_key = os.getenv("LLM_FALLBACK_API_KEY", "")
+        if fallback_key:
+            return fallback_key
+        
+        # Fall back to the primary API key
+        return cls.get_api_key()
     
     @classmethod
     def create_llm_kwargs(cls, component: str) -> dict:

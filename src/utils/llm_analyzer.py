@@ -9,6 +9,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+from src.config.llm_config import LLMConfig
+
 
 class LLMAnalyzer:
     """LLM-powered analyzer for news content and reports."""
@@ -46,35 +48,183 @@ class LLMAnalyzer:
         if base_url:
             llm_kwargs["base_url"] = base_url
 
+        self.base_url = base_url
         self.llm = ChatOpenAI(**llm_kwargs)
         self.output_parser = StrOutputParser()
         self.verbose = verbose
         self._model_name = effective_model
+        self._llm_cache: dict[str, ChatOpenAI] = {}  # Cache for different model instances
+        self._fallback_model: Optional[str] = None  # Lazy-loaded fallback model
         if verbose:
             print(f"    ⏱️  LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})")
 
-    async def _timed_invoke(self, chain, inputs: dict, operation_name: str = "LLM call"):
-        """Execute an LLM call with timing measurement.
+    def _get_llm(self, model: Optional[str] = None, function_name: Optional[str] = None, base_url: Optional[str] = None, api_key: Optional[str] = None) -> ChatOpenAI:
+        """Get or create an LLM instance for the specified model.
+
+        Args:
+            model: Model name to use. If None, uses the function-specific model from env
+                  or the default LLM.
+            function_name: Name of the function calling this method (for env var lookup).
+            base_url: Base URL for API calls. If None, uses the instance's base_url.
+            api_key: API key for authentication. If None, uses the default API key.
+
+        Returns:
+            ChatOpenAI instance for the specified model.
+        """
+        # Determine the effective base URL and API key
+        effective_base_url = base_url if base_url is not None else self.base_url
+        effective_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
+        
+        # If explicit model provided, use it (or create cached instance for it)
+        if model is not None:
+            # Create a cache key that includes the base URL and API key to handle different endpoints
+            cache_key = f"{model}:{effective_base_url or 'default'}:{effective_api_key or 'no-key'}"
+            if cache_key not in self._llm_cache:
+                # Create new LLM instance for this model
+                llm_kwargs = {
+                    "model": model,
+                    "api_key": effective_api_key,
+                    "temperature": 0.7
+                }
+                if effective_base_url:
+                    llm_kwargs["base_url"] = effective_base_url
+                self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
+                if self.verbose:
+                    print(f"    ⏱️  Created new LLM instance for model: {model} (base_url: {effective_base_url or 'default'})")
+            return self._llm_cache[cache_key]
+
+        # No explicit model - check for function-specific model from env vars
+        if function_name:
+            env_model = LLMConfig.get_function_model(function_name)
+            if env_model:
+                cache_key = f"{env_model}:{effective_base_url or 'default'}:{effective_api_key or 'no-key'}"
+                if cache_key not in self._llm_cache:
+                    llm_kwargs = {
+                        "model": env_model,
+                        "api_key": effective_api_key,
+                        "temperature": 0.7
+                    }
+                    if effective_base_url:
+                        llm_kwargs["base_url"] = effective_base_url
+                    self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
+                    if self.verbose:
+                        print(f"    ⏱️  Created new LLM instance for function-specific model: {function_name} -> {env_model}")
+                return self._llm_cache[cache_key]
+
+        # Fall back to default LLM
+        return self.llm
+
+    def _get_fallback_model(self) -> Optional[str]:
+        """Get the fallback model for 40x error retries.
+        
+        Returns:
+            Fallback model name or None if not configured.
+        """
+        if self._fallback_model is None:
+            self._fallback_model = LLMConfig.get_fallback_model()
+        return self._fallback_model
+    
+    def _get_fallback_base_url(self) -> Optional[str]:
+        """Get the fallback base URL for 40x error retries.
+        
+        Returns:
+            Fallback base URL or None to use the primary base URL.
+        """
+        return LLMConfig.get_fallback_base_url()
+    
+    def _get_fallback_api_key(self) -> Optional[str]:
+        """Get the fallback API key for 40x error retries.
+        
+        Returns:
+            Fallback API key or None to use the primary API key.
+        """
+        return LLMConfig.get_fallback_api_key()
+
+    def _is_40x_error(self, error: Exception) -> bool:
+        """Check if an exception is a 40x HTTP error.
+        
+        Args:
+            error: The exception to check.
+            
+        Returns:
+            True if it's a 40x error, False otherwise.
+        """
+        error_str = str(error).lower()
+        # Check for common 40x error patterns
+        error_patterns = [
+            "401", "403", "404", "429",  # Specific status codes
+            "unauthorized", "forbidden", "not found", "rate limit",
+            "too many requests", "invalid request",
+        ]
+        return any(pattern in error_str for pattern in error_patterns)
+
+    async def _timed_invoke(self, chain, inputs: dict, operation_name: str = "LLM call", model: Optional[str] = None, prompt: Optional[ChatPromptTemplate] = None):
+        """Execute an LLM call with timing measurement and retry on 40x errors.
 
         Args:
             chain: The LangChain chain to execute.
             inputs: Input dictionary for the chain.
             operation_name: Human-readable name for the operation (for logging).
+            model: The model being used (for fallback lookup).
+            prompt: The prompt template used to build the chain (for fallback reconstruction).
 
         Returns:
             The response from the chain.
         """
+        fallback_model = self._get_fallback_model()
+        
         if self.verbose:
-            print(f"    ⏱️  LLM call starting: {operation_name} (model: {self._model_name})")
+            print(f"    ⏱️  LLM call starting: {operation_name} (model: {model or self._model_name})")
             start_time = time.perf_counter()
 
-        response = await chain.ainvoke(inputs)
-
-        if self.verbose:
-            elapsed = time.perf_counter() - start_time
-            print(f"    ⏱️  LLM call completed: {operation_name} ({elapsed:.2f}s)")
-
-        return response
+        try:
+            response = await chain.ainvoke(inputs)
+            
+            if self.verbose:
+                elapsed = time.perf_counter() - start_time
+                print(f"    ⏱️  LLM call completed: {operation_name} ({elapsed:.2f}s)")
+            
+            return response
+            
+        except Exception as primary_error:
+            # Check if it's a 40x error and we have a fallback model
+            if fallback_model and self._is_40x_error(primary_error):
+                if self.verbose:
+                    print(f"    ⚠️  40x error on primary model, retrying with fallback: {fallback_model}")
+                
+                # Get fallback LLM instance with fallback base URL and API key
+                fallback_base_url = self._get_fallback_base_url()
+                fallback_api_key = self._get_fallback_api_key()
+                fallback_llm = self._get_llm(model=fallback_model, base_url=fallback_base_url, api_key=fallback_api_key)
+                
+                try:
+                    if self.verbose:
+                        print(f"    ⏱️  LLM fallback call starting: {operation_name} (model: {fallback_model})")
+                        start_time = time.perf_counter()
+                    
+                    # Reconstruct chain with fallback LLM if prompt is available
+                    if prompt is not None:
+                        fallback_chain = prompt | fallback_llm | self.output_parser
+                        fallback_response = await fallback_chain.ainvoke(inputs)
+                    else:
+                        # Fallback: try to invoke the LLM directly with the inputs
+                        # This may not work for all cases but is a best-effort attempt
+                        fallback_response = await (fallback_llm | self.output_parser).ainvoke(inputs)
+                    
+                    if self.verbose:
+                        elapsed = time.perf_counter() - start_time
+                        print(f"    ⏱️  LLM fallback call completed: {operation_name} ({elapsed:.2f}s)")
+                    
+                    return fallback_response
+                    
+                except Exception as fallback_error:
+                    if self.verbose:
+                        print(f"    ❌ Both primary and fallback models failed")
+                    # Raise the original error if fallback also fails
+                    raise primary_error from fallback_error
+            else:
+                # Not a 40x error or no fallback available, raise original
+                raise
 
     def _format_articles_for_prompt(self, articles: list[dict]) -> str:
         """Format articles for inclusion in prompts.
@@ -141,7 +291,8 @@ class LLMAnalyzer:
     async def generate_executive_summary(
         self,
         articles: list[dict],
-        technologies: list[dict]
+        technologies: list[dict],
+        model: Optional[str] = None
     ) -> str:
         """Generate an intelligent executive summary using LLM.
 
@@ -169,18 +320,20 @@ Technologies:
 Generate an executive summary:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="executive_summary")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "articles": self._format_articles_for_prompt(articles),
             "technologies": self._format_technologies_for_prompt(technologies)
-        }, "generate_executive_summary")
+        }, f"generate_executive_summary (model: {model or LLMConfig.get_function_model('executive_summary') or self._model_name})", model=model, prompt=prompt)
 
         return response
 
     async def analyze_significance(
         self,
         article: dict,
-        related_technologies: list[dict]
+        related_technologies: list[dict],
+        model: Optional[str] = None
     ) -> dict:
         """Analyze the significance of a news article using LLM.
 
@@ -212,20 +365,25 @@ Related Technologies: {technologies}
 Analyze the significance and return JSON:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="significance")
+        chain = prompt | llm | self.output_parser
         # Use full content if available, otherwise fall back to summary
         content = article.get("content", "") or article.get("summary", "")
         response = await self._timed_invoke(chain, {
             "title": article.get("title", ""),
             "content": content[:2000],  # Use more content for better analysis
             "technologies": ", ".join([t.get("name", "") for t in related_technologies])
-        }, "analyze_significance")
+        }, f"analyze_significance (model: {model or LLMConfig.get_function_model('significance') or self._model_name})", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         result["article_title"] = article.get("title", "")
         return result
 
-    async def extract_entities_with_context(self, text: str) -> dict:
+    async def extract_entities_with_context(
+        self,
+        text: str,
+        model: Optional[str] = None
+    ) -> dict:
         """Extract companies and countries with context using LLM.
 
         Args:
@@ -246,8 +404,9 @@ Analyze the significance and return JSON:""")
 Extract entities and return JSON:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
-        response = await self._timed_invoke(chain, {"text": text[:2000]}, "extract_entities_with_context")
+        llm = self._get_llm(model, function_name="extract_entities_with_context")
+        chain = prompt | llm | self.output_parser
+        response = await self._timed_invoke(chain, {"text": text[:2000]}, f"extract_entities_with_context (model: {model or LLMConfig.get_function_model('extract_entities_with_context') or self._model_name})", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         return {
@@ -259,7 +418,8 @@ Extract entities and return JSON:""")
         self,
         title: str,
         content: str = "",
-        summary: str = ""
+        summary: str = "",
+        model: Optional[str] = None
     ) -> dict:
         """Extract all entities (technologies, companies, countries) from article in a single LLM call.
 
@@ -343,11 +503,12 @@ Article Content:
 Extract all entities and return JSON:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="extract_all_entities")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "title": title,
             "content": full_text[:2500]  # Limit total text length
-        }, "extract_all_entities")
+        }, f"extract_all_entities (model: {model or LLMConfig.get_function_model('extract_all_entities') or self._model_name})", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
 
@@ -412,7 +573,8 @@ Extract all entities and return JSON:""")
     async def generate_trend_analysis(
         self,
         technologies: list[dict],
-        articles: list[dict]
+        articles: list[dict],
+        model: Optional[str] = None
     ) -> str:
         """Generate trend analysis using LLM.
 
@@ -441,17 +603,19 @@ Recent Articles:
 Generate a comprehensive trend analysis:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="trend_analysis")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "technologies": self._format_technologies_for_prompt(technologies),
             "articles": self._format_articles_for_prompt(articles[:15])
-        }, "generate_trend_analysis")
+        }, f"generate_trend_analysis (model: {model or LLMConfig.get_function_model('trend_analysis') or self._model_name})", model=model, prompt=prompt)
 
         return response
 
     async def generate_market_impact_summary(
         self,
-        significance_analyses: list[dict]
+        significance_analyses: list[dict],
+        model: Optional[str] = None
     ) -> str:
         """Generate a summary of market impact from significance analyses.
 
@@ -482,17 +646,19 @@ Generate a comprehensive trend analysis:""")
 Generate a market impact summary:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="market_impact_summary")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "analyses": "\n".join(analyses_text)
-        }, "generate_market_impact_summary")
+        }, f"generate_market_impact_summary (model: {model or LLMConfig.get_function_model('market_impact_summary') or self._model_name})", model=model, prompt=prompt)
 
         return response
 
     async def generate_geographic_insights(
         self,
         countries: list[dict],
-        articles: list[dict]
+        articles: list[dict],
+        model: Optional[str] = None
     ) -> str:
         """Generate geographic insights using LLM.
 
@@ -524,17 +690,19 @@ Generate a market impact summary:""")
 Generate geographic insights:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="geographic_insights")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "countries": "\n".join(countries_text)
-        }, "generate_geographic_insights")
+        }, f"generate_geographic_insights (model: {model or LLMConfig.get_function_model('geographic_insights') or self._model_name})", model=model, prompt=prompt)
 
         return response
 
     async def analyze_article_relevance(
         self,
         title: str,
-        summary: str = ""
+        summary: str = "",
+        model: Optional[str] = None
     ) -> tuple[bool, list[str], float]:
         """Analyze if an article is technology-related and calculate relevance in a single LLM call.
 
@@ -591,11 +759,12 @@ Article Summary: {summary}
 Analyze and return JSON:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="article_relevance")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "title": title,
             "summary": summary[:500] if summary else "N/A"
-        }, "analyze_article_relevance")
+        }, f"analyze_article_relevance (model: {model or LLMConfig.get_function_model('article_relevance') or self._model_name})", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
@@ -621,7 +790,8 @@ Analyze and return JSON:""")
         articles: list[dict],
         technologies: list[dict],
         top_companies: list[dict],
-        top_countries: list[dict]
+        top_countries: list[dict],
+        model: Optional[str] = None
     ) -> dict:
         """Generate all report sections in a single LLM call.
 
@@ -740,14 +910,15 @@ High-Relevance Articles for Significance Analysis:
 Generate the complete report analysis as JSON:""")
         ])
 
-        chain = prompt | self.llm | self.output_parser
+        llm = self._get_llm(model, function_name="complete_report")
+        chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "articles": articles_text,
             "technologies": technologies_text,
             "companies": companies_text or "No company data available",
             "countries": countries_text or "No country data available",
             "high_relevance_articles": high_relevance_text
-        }, "generate_complete_report")
+        }, f"generate_complete_report (model: {model or LLMConfig.get_function_model('complete_report') or self._model_name})", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         
