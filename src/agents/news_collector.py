@@ -2,6 +2,7 @@ from .base import BaseAgent
 from ..utils.failure_logger import FailureLogger
 from ..config.llm_config import LLMConfig
 from ..config.rss_config import RSSConfig
+from ..config.defaults import SENTIMENT_POSITIVE_WORDS, SENTIMENT_NEGATIVE_WORDS
 from ..utils.entity_extractor import EntityExtractor
 from ..storage.sqlite_store import SQLiteStore
 from ..models.schemas import TechnologyMention
@@ -16,94 +17,6 @@ import re
 import uuid
 
 logger = logging.getLogger(__name__)
-
-
-# Default fallback sources (used when .env is not configured)
-DEFAULT_TECH_NEWS_SOURCES = [
-    "https://techcrunch.com/feed/",
-    "https://www.theverge.com/rss/index.xml",
-    "https://arstechnica.com/feed/",
-    "https://www.wired.com/feed/rss",
-    "https://news.ycombinator.com/rss",
-    "https://www.zdnet.com/news/rss/",
-    "https://thenextweb.com/feed/",
-]
-
-# Default fallback keywords (used when .env is not configured)
-DEFAULT_TECH_KEYWORDS = [
-    "AI",
-    "artificial intelligence",
-    "machine learning",
-    "deep learning",
-    "neural network",
-    "LLM",
-    "large language model",
-    "quantum computing",
-    "blockchain",
-    "cryptocurrency",
-    "web3",
-    "metaverse",
-    "robotics",
-    "autonomous",
-    "edge computing",
-    "cloud computing",
-    "serverless",
-    "kubernetes",
-    "microservices",
-    "API",
-    "devops",
-    "cybersecurity",
-    "zero trust",
-    "5G",
-    "6G",
-    "IoT",
-    "Internet of Things",
-    "augmented reality",
-    "virtual reality",
-    "AR",
-    "VR",
-    "mixed reality",
-    "biotech",
-    "gene editing",
-    "CRISPR",
-    "nanotechnology",
-    "battery technology",
-    "renewable energy",
-    "solar",
-    "fusion",
-    "semiconductor",
-    "chip",
-    "processor",
-    "GPU",
-    "TPU",
-    "neuromorphic",
-    "brain-computer interface",
-    "autonomous vehicle",
-    "electric vehicle",
-    "EV",
-    "hydrogen fuel",
-    "carbon capture",
-    "climate tech",
-    "agritech",
-    "food tech",
-    "space technology",
-    "satellite",
-    "rocket",
-    "3D printing",
-    "additive manufacturing",
-    "material science",
-    "graphene",
-    "superconductor",
-    "RAG",
-    "agent",
-    "multi-agent",
-    "transformer",
-    "diffusion model",
-    "generative AI",
-    "computer vision",
-    "NLP",
-    "natural language processing",
-]
 
 
 class NewsCollectorAgent(BaseAgent):
@@ -1074,52 +987,11 @@ class NewsCollectorAgent(BaseAgent):
         return score
 
     async def analyze_sentiment(self, text: str) -> float:
-        positive_words = [
-            "breakthrough",
-            "innovative",
-            "revolutionary",
-            "promising",
-            "exciting",
-            "impressive",
-            "advanced",
-            "successful",
-            "growth",
-            "improve",
-            "better",
-            "faster",
-            "efficient",
-            "powerful",
-            "leading",
-            "cutting-edge",
-            "game-changing",
-            "transformative",
-        ]
-
-        negative_words = [
-            "failed",
-            "failure",
-            "concern",
-            "risk",
-            "threat",
-            "problem",
-            "issue",
-            "challenge",
-            "decline",
-            "slow",
-            "weak",
-            "lagging",
-            "controversial",
-            "criticism",
-            "lawsuit",
-            "ban",
-            "investigation",
-        ]
-
         text_lower = text.lower()
         positive_count = sum(
-            1 for word in positive_words if word in text_lower)
+            1 for word in SENTIMENT_POSITIVE_WORDS if word in text_lower)
         negative_count = sum(
-            1 for word in negative_words if word in text_lower)
+            1 for word in SENTIMENT_NEGATIVE_WORDS if word in text_lower)
 
         total = positive_count + negative_count
         if total == 0:

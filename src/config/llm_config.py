@@ -24,6 +24,14 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 
+from .defaults import (
+    DEFAULT_LLM_MODELS,
+    DEFAULT_FALLBACK_MODELS,
+    DEFAULT_LLM_TEMPERATURE,
+    LLM_COMPONENT_MODEL_VARS,
+    LLM_FUNCTION_MODEL_VARS,
+)
+
 # Load environment variables
 load_dotenv()
 
@@ -43,41 +51,11 @@ class LLMConfig:
         >>> base_url = config.get_base_url()
     """
     
-    # Default models for each provider
-    DEFAULT_MODELS = {
-        "openrouter": "qwen/qwen3.5-27b",
-        "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-haiku-20240307",
-    }
-    
-    # Component-specific model env var names
-    COMPONENT_MODEL_VARS = {
-        "news_collector": "NEWS_COLLECTOR_LLM_MODEL",
-        "report_generator": "REPORT_GENERATOR_LLM_MODEL",
-        "entity_extractor": "ENTITY_EXTRACTOR_LLM_MODEL",
-        "technology_analyzer": "TECHNOLOGY_ANALYZER_LLM_MODEL",
-    }
-    
-    # LLMAnalyzer function-specific model env var names
-    FUNCTION_MODEL_VARS = {
-        "executive_summary": "LLM_EXECUTIVE_SUMMARY_MODEL",
-        "significance": "LLM_SIGNIFICANCE_MODEL",
-        "extract_entities": "LLM_EXTRACT_ENTITIES_MODEL",
-        "extract_entities_with_context": "LLM_EXTRACT_ENTITIES_MODEL",
-        "extract_all_entities": "LLM_EXTRACT_ENTITIES_MODEL",
-        "trend_analysis": "LLM_TREND_ANALYSIS_MODEL",
-        "market_impact_summary": "LLM_MARKET_IMPACT_MODEL",
-        "geographic_insights": "LLM_GEOGRAPHIC_INSIGHTS_MODEL",
-        "article_relevance": "LLM_ARTICLE_RELEVANCE_MODEL",
-        "complete_report": "LLM_COMPLETE_REPORT_MODEL",
-    }
-    
-    # Fallback models for 40x errors (provider-specific defaults)
-    FALLBACK_MODELS = {
-        "openrouter": "anthropic/claude-3-haiku",
-        "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-haiku-20240307",
-    }
+    # Reference defaults from centralized defaults module
+    DEFAULT_MODELS = DEFAULT_LLM_MODELS
+    COMPONENT_MODEL_VARS = LLM_COMPONENT_MODEL_VARS
+    FUNCTION_MODEL_VARS = LLM_FUNCTION_MODEL_VARS
+    FALLBACK_MODELS = DEFAULT_FALLBACK_MODELS
     
     @classmethod
     def get_provider(cls) -> str:
@@ -165,9 +143,9 @@ class LLMConfig:
             Temperature value (default: 0.7).
         """
         try:
-            return float(os.getenv("LLM_TEMPERATURE", "0.7"))
+            return float(os.getenv("LLM_TEMPERATURE", str(DEFAULT_LLM_TEMPERATURE)))
         except ValueError:
-            return 0.7
+            return DEFAULT_LLM_TEMPERATURE
     
     @classmethod
     def get_default_model(cls) -> str:

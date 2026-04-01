@@ -11,6 +11,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 from dotenv import load_dotenv
 
+from .defaults import (
+    DEFAULT_RSS_SOURCES,
+    DEFAULT_TECH_KEYWORDS,
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_FAILURE_LOG_PATH,
+    DEFAULT_LLM_MODELS,
+)
+
 # Load environment variables
 load_dotenv()
 
@@ -48,72 +56,9 @@ class RSSConfig:
         >>> keywords = config.get_keywords()
     """
     
-    # Default RSS sources for tech news
-    DEFAULT_SOURCES = [
-        "https://techcrunch.com/feed/",
-        "https://www.theverge.com/rss/index.xml",
-        "https://arstechnica.com/feed/",
-        "https://www.wired.com/feed/rss",
-        "https://news.ycombinator.com/rss",
-        "https://www.zdnet.com/news/rss/",
-        "https://thenextweb.com/feed/",
-    ]
-    
-    # Default technology keywords for filtering
-    DEFAULT_KEYWORDS = [
-        # AI/ML
-        "AI", "artificial intelligence", "machine learning", "deep learning",
-        "neural network", "LLM", "large language model", "transformer",
-        "diffusion model", "generative AI", "computer vision", "NLP",
-        "RAG", "agent", "multi-agent", "GPT", "ChatGPT", "Claude", "Gemini",
-        "OpenAI", "Anthropic", "Hugging Face",
-        
-        # Quantum Computing
-        "quantum computing", "quantum", "qubit", "quantum supremacy",
-        "quantum error correction", "IBM Quantum", "Google Quantum",
-        
-        # Blockchain/Web3
-        "blockchain", "cryptocurrency", "web3", "crypto", "NFT", "DeFi",
-        "smart contract", "Bitcoin", "Ethereum", "Solana",
-        
-        # Robotics
-        "robotics", "robot", "autonomous", "humanoid", "automation",
-        "Boston Dynamics", "Tesla Optimus",
-        
-        # Cloud/Infrastructure
-        "cloud computing", "edge computing", "serverless", "kubernetes",
-        "microservices", "devops", "API", "AWS", "Azure", "Google Cloud",
-        
-        # Cybersecurity
-        "cybersecurity", "zero trust", "encryption", "authentication",
-        "security", "data breach", "hacking",
-        
-        # Telecommunications
-        "5G", "6G", "telecommunications", "network", "Starlink",
-        
-        # IoT
-        "IoT", "Internet of Things", "sensor", "connected devices",
-        
-        # AR/VR/MR
-        "augmented reality", "virtual reality", "AR", "VR", "mixed reality",
-        "metaverse", "Apple Vision Pro", "Meta Quest",
-        
-        # Biotech
-        "biotech", "gene editing", "CRISPR", "synthetic biology",
-        "biomedical", "mRNA",
-        
-        # Energy/Cleantech
-        "battery technology", "renewable energy", "solar", "fusion",
-        "hydrogen fuel", "carbon capture", "climate tech", "EV", "electric vehicle",
-        
-        # Semiconductors
-        "semiconductor", "chip", "processor", "GPU", "NVIDIA", "AMD", "Intel",
-        "TSMC", "ARM", "RISC-V",
-        
-        # Software Development
-        "software development", "programming", "developer", "API",
-        "open source", "GitHub", "GitLab",
-    ]
+    # Reference defaults from centralized defaults module
+    DEFAULT_SOURCES = DEFAULT_RSS_SOURCES
+    DEFAULT_KEYWORDS = DEFAULT_TECH_KEYWORDS
     
     @classmethod
     def _load_json_file(cls, file_path: str) -> Optional[Union[Dict, List]]:
@@ -207,9 +152,9 @@ class RSSConfig:
             Timeout in seconds for HTTP requests.
         """
         try:
-            return int(os.getenv("RSS_CONTENT_TIMEOUT", "30"))
+            return int(os.getenv("RSS_CONTENT_TIMEOUT", str(DEFAULT_HTTP_TIMEOUT)))
         except ValueError:
-            return 30
+            return DEFAULT_HTTP_TIMEOUT
     
     @classmethod
     def is_failure_logging_enabled(cls) -> bool:
@@ -227,7 +172,7 @@ class RSSConfig:
         Returns:
             Path to the failure log file.
         """
-        return os.getenv("RSS_LOG_FILE", "./logs/rss_failures.log")
+        return os.getenv("RSS_LOG_FILE", DEFAULT_FAILURE_LOG_PATH)
     
     @classmethod
     def validate_sources(cls, sources: List[str]) -> List[str]:
@@ -274,12 +219,7 @@ class RSSConfig:
             LLM model name.
         """
         provider = cls.get_llm_provider()
-        default_models = {
-            "openrouter": "qwen/qwen3.5-27b",
-            "openai": "gpt-4o-mini",
-            "anthropic": "claude-3-haiku-20240307",
-        }
-        return os.getenv("RSS_LLM_MODEL", default_models.get(provider, "gpt-4o-mini"))
+        return os.getenv("RSS_LLM_MODEL", DEFAULT_LLM_MODELS.get(provider, "gpt-4o-mini"))
     
     @classmethod
     def get_llm_api_key(cls) -> Optional[str]:

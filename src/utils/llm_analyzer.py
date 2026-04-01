@@ -325,7 +325,7 @@ Generate an executive summary:""")
         response = await self._timed_invoke(chain, {
             "articles": self._format_articles_for_prompt(articles),
             "technologies": self._format_technologies_for_prompt(technologies)
-        }, f"generate_executive_summary (model: {model or LLMConfig.get_function_model('executive_summary') or self._model_name})", model=model, prompt=prompt)
+        }, "generate_executive_summary", model=model, prompt=prompt)
 
         return response
 
@@ -373,7 +373,7 @@ Analyze the significance and return JSON:""")
             "title": article.get("title", ""),
             "content": content[:2000],  # Use more content for better analysis
             "technologies": ", ".join([t.get("name", "") for t in related_technologies])
-        }, f"analyze_significance (model: {model or LLMConfig.get_function_model('significance') or self._model_name})", model=model, prompt=prompt)
+        }, "analyze_significance", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         result["article_title"] = article.get("title", "")
@@ -406,7 +406,7 @@ Extract entities and return JSON:""")
 
         llm = self._get_llm(model, function_name="extract_entities_with_context")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {"text": text[:2000]}, f"extract_entities_with_context (model: {model or LLMConfig.get_function_model('extract_entities_with_context') or self._model_name})", model=model, prompt=prompt)
+        response = await self._timed_invoke(chain, {"text": text[:2000]}, "extract_entities_with_context", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         return {
@@ -508,7 +508,7 @@ Extract all entities and return JSON:""")
         response = await self._timed_invoke(chain, {
             "title": title,
             "content": full_text[:2500]  # Limit total text length
-        }, f"extract_all_entities (model: {model or LLMConfig.get_function_model('extract_all_entities') or self._model_name})", model=model, prompt=prompt)
+        }, "extract_all_entities", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
 
@@ -608,7 +608,7 @@ Generate a comprehensive trend analysis:""")
         response = await self._timed_invoke(chain, {
             "technologies": self._format_technologies_for_prompt(technologies),
             "articles": self._format_articles_for_prompt(articles[:15])
-        }, f"generate_trend_analysis (model: {model or LLMConfig.get_function_model('trend_analysis') or self._model_name})", model=model, prompt=prompt)
+        }, "generate_trend_analysis", model=model, prompt=prompt)
 
         return response
 
@@ -650,7 +650,7 @@ Generate a market impact summary:""")
         chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "analyses": "\n".join(analyses_text)
-        }, f"generate_market_impact_summary (model: {model or LLMConfig.get_function_model('market_impact_summary') or self._model_name})", model=model, prompt=prompt)
+        }, "generate_market_impact_summary", model=model, prompt=prompt)
 
         return response
 
@@ -694,7 +694,7 @@ Generate geographic insights:""")
         chain = prompt | llm | self.output_parser
         response = await self._timed_invoke(chain, {
             "countries": "\n".join(countries_text)
-        }, f"generate_geographic_insights (model: {model or LLMConfig.get_function_model('geographic_insights') or self._model_name})", model=model, prompt=prompt)
+        }, "generate_geographic_insights", model=model, prompt=prompt)
 
         return response
 
@@ -764,7 +764,7 @@ Analyze and return JSON:""")
         response = await self._timed_invoke(chain, {
             "title": title,
             "summary": summary[:500] if summary else "N/A"
-        }, f"analyze_article_relevance (model: {model or LLMConfig.get_function_model('article_relevance') or self._model_name})", model=model, prompt=prompt)
+        }, "analyze_article_relevance", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
@@ -918,7 +918,7 @@ Generate the complete report analysis as JSON:""")
             "companies": companies_text or "No company data available",
             "countries": countries_text or "No country data available",
             "high_relevance_articles": high_relevance_text
-        }, f"generate_complete_report (model: {model or LLMConfig.get_function_model('complete_report') or self._model_name})", model=model, prompt=prompt)
+        }, "generate_complete_report", model=model, prompt=prompt)
 
         result = self._parse_json_response(response)
         

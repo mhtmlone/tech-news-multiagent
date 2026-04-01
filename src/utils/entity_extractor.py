@@ -3,6 +3,8 @@
 import re
 from typing import Optional
 
+from ..config.defaults import TECH_CATEGORIES, TECH_COMPANIES, COUNTRIES, TECH_NAME_NORMALIZATIONS
+
 
 class EntityExtractor:
     """Extract companies, countries, and technologies from text.
@@ -10,200 +12,6 @@ class EntityExtractor:
     This class provides both pattern-based extraction (using predefined dictionaries)
     and LLM-based extraction (using the unified extract_all_entities method).
     """
-    
-    # Known tech companies with country mapping
-    TECH_COMPANIES = {
-        # USA
-        "OpenAI": "USA",
-        "Google": "USA",
-        "Microsoft": "USA",
-        "Apple": "USA",
-        "Meta": "USA",
-        "Facebook": "USA",
-        "Amazon": "USA",
-        "NVIDIA": "USA",
-        "Tesla": "USA",
-        "Anthropic": "USA",
-        "Intel": "USA",
-        "AMD": "USA",
-        "IBM": "USA",
-        "Oracle": "USA",
-        "Salesforce": "USA",
-        "Adobe": "USA",
-        "Cisco": "USA",
-        "Qualcomm": "USA",
-        "Broadcom": "USA",
-        "Texas Instruments": "USA",
-        "Palantir": "USA",
-        "Snowflake": "USA",
-        "Databricks": "USA",
-        "Stripe": "USA",
-        "SpaceX": "USA",
-        "Uber": "USA",
-        "Lyft": "USA",
-        "Airbnb": "USA",
-        "Netflix": "USA",
-        "Spotify": "Sweden",
-        # UK
-        "DeepMind": "UK",
-        "ARM": "UK",
-        "Graphcore": "UK",
-        "Wayve": "UK",
-        # China
-        "Huawei": "China",
-        "Alibaba": "China",
-        "Tencent": "China",
-        "Baidu": "China",
-        "ByteDance": "China",
-        "Xiaomi": "China",
-        "DJ": "China",
-        "OPPO": "China",
-        "Vivo": "China",
-        "Lenovo": "China",
-        "SMIC": "China",
-        "DiDi": "China",
-        "JD.com": "China",
-        "PDD": "China",
-        # South Korea
-        "Samsung": "South Korea",
-        "LG": "South Korea",
-        "SK Hynix": "South Korea",
-        "Kakao": "South Korea",
-        "Naver": "South Korea",
-        # Japan
-        "Sony": "Japan",
-        "Toyota": "Japan",
-        "SoftBank": "Japan",
-        "Nintendo": "Japan",
-        "Panasonic": "Japan",
-        "Hitachi": "Japan",
-        "Fujitsu": "Japan",
-        "NEC": "Japan",
-        "Renesas": "Japan",
-        "NTT": "Japan",
-        # Taiwan
-        "TSMC": "Taiwan",
-        "Foxconn": "Taiwan",
-        "MediaTek": "Taiwan",
-        # Netherlands
-        "ASML": "Netherlands",
-        "NXP": "Netherlands",
-        # Germany
-        "SAP": "Germany",
-        "Siemens": "Germany",
-        "Bosch": "Germany",
-        "Infineon": "Germany",
-        # France
-        "Thales": "France",
-        "Dassault": "France",
-        "STMicroelectronics": "France/Switzerland",
-        # Israel
-        "Mobileye": "Israel",
-        "Wiz": "Israel",
-        # India
-        "TCS": "India",
-        "Infosys": "India",
-        "Wipro": "India",
-        # Canada
-        "Shopify": "Canada",
-        "Element AI": "Canada",
-        # Singapore
-        "Grab": "Singapore",
-        "Sea": "Singapore",
-    }
-    
-    # Country names and their ISO codes
-    COUNTRIES = {
-        "USA": ("United States", "US", "USA", "America", "American", "U.S.", "U.S.A."),
-        "UK": ("United Kingdom", "UK", "Britain", "British", "England", "English", "U.K."),
-        "China": ("China", "Chinese", "PRC", "P.R.C."),
-        "Japan": ("Japan", "Japanese"),
-        "South Korea": ("South Korea", "Korea", "Korean", "Republic of Korea", "ROK"),
-        "Germany": ("Germany", "German", "Deutschland"),
-        "France": ("France", "French"),
-        "India": ("India", "Indian"),
-        "Israel": ("Israel", "Israeli"),
-        "Taiwan": ("Taiwan", "Taiwanese"),
-        "Netherlands": ("Netherlands", "Dutch", "Holland"),
-        "Singapore": ("Singapore", "Singaporean"),
-        "Canada": ("Canada", "Canadian"),
-        "Australia": ("Australia", "Australian"),
-        "Sweden": ("Sweden", "Swedish"),
-        "Switzerland": ("Switzerland", "Swiss"),
-        "South Africa": ("South Africa", "South African"),
-        "Brazil": ("Brazil", "Brazilian"),
-        "Russia": ("Russia", "Russian"),
-        "Italy": ("Italy", "Italian"),
-        "Spain": ("Spain", "Spanish"),
-        "Mexico": ("Mexico", "Mexican"),
-        "Indonesia": ("Indonesia", "Indonesian"),
-        "Vietnam": ("Vietnam", "Vietnamese"),
-        "Thailand": ("Thailand", "Thai"),
-        "Malaysia": ("Malaysia", "Malaysian"),
-        "Philippines": ("Philippines", "Filipino"),
-        "UAE": ("UAE", "United Arab Emirates", "Dubai", "Abu Dhabi"),
-        "Saudi Arabia": ("Saudi Arabia", "Saudi", "Saudi Arabian"),
-    }
-    
-    # Technology categories with keywords
-    TECH_CATEGORIES = {
-        "AI/ML": [
-            "AI", "artificial intelligence", "machine learning", "deep learning",
-            "neural network", "LLM", "large language model", "transformer",
-            "diffusion model", "generative AI", "computer vision", "NLP",
-            "RAG", "agent", "multi-agent", "GPT", "Claude", "Gemini"
-        ],
-        "Quantum Computing": [
-            "quantum computing", "quantum", "qubit", "quantum supremacy"
-        ],
-        "Blockchain/Web3": [
-            "blockchain", "cryptocurrency", "web3", "crypto", "NFT", "DeFi",
-            "smart contract", "Bitcoin", "Ethereum"
-        ],
-        "Robotics": [
-            "robotics", "robot", "autonomous", "humanoid", "automation"
-        ],
-        "Cloud/Infrastructure": [
-            "cloud computing", "edge computing", "serverless", "kubernetes",
-            "microservices", "devops", "API", "AWS", "Azure", "GCP"
-        ],
-        "Cybersecurity": [
-            "cybersecurity", "zero trust", "encryption", "authentication",
-            "security", "hacking", "vulnerability"
-        ],
-        "Telecommunications": [
-            "5G", "6G", "telecommunications", "network"
-        ],
-        "IoT": [
-            "IoT", "Internet of Things", "sensor", "connected"
-        ],
-        "AR/VR/MR": [
-            "augmented reality", "virtual reality", "AR", "VR",
-            "mixed reality", "metaverse", "XR"
-        ],
-        "Biotech": [
-            "biotech", "gene editing", "CRISPR", "synthetic biology", "biomedical"
-        ],
-        "Energy/Cleantech": [
-            "battery technology", "renewable energy", "solar", "fusion",
-            "hydrogen fuel", "carbon capture", "climate tech", "electric vehicle", "EV"
-        ],
-        "Semiconductors": [
-            "semiconductor", "chip", "processor", "GPU", "TPU", "neuromorphic"
-        ],
-        "Hardware/Interfaces": [
-            "brain-computer interface", "wearable", "hardware"
-        ],
-        "Space Tech": [
-            "space technology", "satellite", "rocket", "spaceX"
-        ],
-        "Manufacturing": [
-            "3D printing", "additive manufacturing", "nanotechnology"
-        ],
-        "Materials": [
-            "material science", "graphene", "superconductor"
-        ],
-    }
     
     # Build reverse lookup for countries
     COUNTRY_LOOKUP = {}
@@ -220,6 +28,10 @@ class EntityExtractor:
         """
         self.use_llm = use_llm
         self.llm_analyzer = llm_analyzer
+        
+        # Reference to module-level constants
+        self.TECH_COMPANIES = TECH_COMPANIES
+        self.COUNTRIES = COUNTRIES
         
         # Build regex patterns for companies
         company_names = list(self.TECH_COMPANIES.keys())
@@ -436,7 +248,7 @@ class EntityExtractor:
             Dictionary mapping category to compiled regex pattern.
         """
         patterns = {}
-        for category, keywords in self.TECH_CATEGORIES.items():
+        for category, keywords in TECH_CATEGORIES.items():
             pattern_str = r"\b(" + "|".join(re.escape(kw) for kw in keywords) + r")\b"
             patterns[category] = re.compile(pattern_str, re.IGNORECASE)
         return patterns
@@ -479,31 +291,9 @@ class EntityExtractor:
         Returns:
             Normalized technology name.
         """
-        # Common normalizations
-        normalizations = {
-            "ai": "AI",
-            "ml": "ML",
-            "llm": "LLM",
-            "nlp": "NLP",
-            "rag": "RAG",
-            "ar": "AR",
-            "vr": "VR",
-            "xr": "XR",
-            "iot": "IoT",
-            "ev": "EV",
-            "gpu": "GPU",
-            "tpu": "TPU",
-            "5g": "5G",
-            "6g": "6G",
-            "nft": "NFT",
-            "defi": "DeFi",
-            "web3": "Web3",
-            "crispr": "CRISPR",
-        }
-        
         lower_tech = tech.lower()
-        if lower_tech in normalizations:
-            return normalizations[lower_tech]
+        if lower_tech in TECH_NAME_NORMALIZATIONS:
+            return TECH_NAME_NORMALIZATIONS[lower_tech]
         
         # Capitalize first letter of each word
         return tech.title()

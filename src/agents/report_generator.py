@@ -10,6 +10,7 @@ from ..storage.sqlite_store import SQLiteStore
 from ..utils.llm_analyzer import LLMAnalyzer
 from ..utils.entity_extractor import EntityExtractor
 from ..config.llm_config import LLMConfig
+from ..config.defaults import THEME_KEYWORDS
 from .base import BaseAgent
 
 
@@ -425,22 +426,10 @@ class ReportGeneratorAgent(BaseAgent):
         if not all_content:
             return ""
         
-        # Simple keyword-based theme extraction
-        theme_keywords = {
-            "Artificial Intelligence": ["AI", "artificial intelligence", "machine learning", "deep learning", "neural network", "LLM", "GPT"],
-            "Cloud Computing": ["cloud", "AWS", "Azure", "Google Cloud", "kubernetes", "serverless"],
-            "Cybersecurity": ["security", "cyber", "hack", "breach", "encryption", "zero trust"],
-            "Semiconductors": ["chip", "semiconductor", "processor", "GPU", "NVIDIA", "Intel", "AMD"],
-            "Blockchain/Web3": ["blockchain", "crypto", "bitcoin", "ethereum", "web3", "NFT"],
-            "Quantum Computing": ["quantum", "qubit", "quantum computing"],
-            "Robotics": ["robot", "robotics", "autonomous", "drone"],
-            "Biotechnology": ["biotech", "gene", "CRISPR", "genomic", "pharmaceutical"],
-        }
-        
         theme_counts = {}
         combined_text = " ".join(all_content).lower()
         
-        for theme, keywords in theme_keywords.items():
+        for theme, keywords in THEME_KEYWORDS.items():
             count = sum(combined_text.count(kw.lower()) for kw in keywords)
             if count > 0:
                 theme_counts[theme] = count
