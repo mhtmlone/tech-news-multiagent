@@ -29,7 +29,7 @@ class NewsCollectorAgent(BaseAgent):
         extract_entities: bool = True,
         rss_config: RSSConfig = None,
         verbose: bool = False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(name="NewsCollectorAgent", **kwargs)
 
@@ -40,8 +40,9 @@ class NewsCollectorAgent(BaseAgent):
         self.verbose = verbose
 
         # Initialize failure logger if enabled
-        self.failure_logger = FailureLogger(
-        ) if self.rss_config.is_failure_logging_enabled() else None
+        self.failure_logger = (
+            FailureLogger() if self.rss_config.is_failure_logging_enabled() else None
+        )
 
         self.session: Optional[aiohttp.ClientSession] = None
         self.sqlite_store = sqlite_store or SQLiteStore()
@@ -51,6 +52,7 @@ class NewsCollectorAgent(BaseAgent):
         self.llm_analyzer = None
         if LLMConfig.is_enabled():
             from ..utils.llm_analyzer import LLMAnalyzer
+
             llm_kwargs = LLMConfig.create_llm_kwargs("news_collector")
             llm_kwargs["verbose"] = self.verbose
             self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
@@ -59,19 +61,37 @@ class NewsCollectorAgent(BaseAgent):
                 f"provider={LLMConfig.get_provider()}, "
                 f"model={LLMConfig.get_model('news_collector')}"
             )
+        else:
+            logger.info(
+                "LLM-based technology classification disabled: "
+                "LLM provider not configured or API key not set. "
+                "Falling back to keyword-based matching."
+            )
 
         # Initialize entity extractor with LLM support if available
-        self.entity_extractor = EntityExtractor(
-            use_llm=self.llm_analyzer is not None,
-            llm_analyzer=self.llm_analyzer
-        ) if extract_entities else None
+        self.entity_extractor = (
+            EntityExtractor(
+                use_llm=self.llm_analyzer is not None, llm_analyzer=self.llm_analyzer
+            )
+            if extract_entities
+            else None
+        )
 
         # Log configuration on startup
+        llm_status = (
+            f"enabled (provider={LLMConfig.get_provider()}, "
+            f"model={LLMConfig.get_model('news_collector')})"
+            if self.llm_analyzer
+            else "disabled (using keyword-based fallback)"
+        )
         logger.info(
             f"NewsCollectorAgent initialized with {len(self.sources)} sources, "
             f"{len(self.keywords)} keywords, "
-            f"failure logging: {'enabled' if self.failure_logger else 'disabled'}"
+            f"failure logging: {'enabled' if self.failure_logger else 'disabled'}, "
+            f"LLM relevancy: {llm_status}"
         )
+        if self.verbose:
+            print(f"\n🔍 LLM Analyzer: {llm_status}")
 
     async def _ensure_session(self):
         if self.session is None or self.session.closed:
@@ -106,12 +126,12 @@ class NewsCollectorAgent(BaseAgent):
             session=self.session,
             timeout=self.rss_config.get_timeout(),
             failure_logger=self.failure_logger,
-            verbose=self.verbose
+            verbose=self.verbose,
         )
 
     async def fetch_all_feeds(self) -> list[dict]:
         """Fetch all RSS feeds from configured sources.
-        
+
         Returns:
             List of all feed entries from all sources
         """
@@ -126,7 +146,7 @@ class NewsCollectorAgent(BaseAgent):
             session=self.session,
             failure_logger=self.failure_logger,
             verbose=self.verbose,
-            timeout=self.rss_config.get_timeout()
+            timeout=self.rss_config.get_timeout(),
         )
 
     def filter_new_entries(self, entries: list[dict]) -> list[dict]:
@@ -166,7 +186,7 @@ class NewsCollectorAgent(BaseAgent):
                     self.failure_logger.log_url_duplicate(
                         url=url,
                         title=entry.get("title", ""),
-                        source=entry.get("source", "")
+                        source=entry.get("source", ""),
                     )
                 logger.debug(f"Skipping duplicate URL: {url}")
             else:
@@ -174,7 +194,8 @@ class NewsCollectorAgent(BaseAgent):
 
         if duplicate_count > 0:
             logger.info(
-                f"Filtered out {duplicate_count} duplicate URLs, {len(new_entries)} new entries remaining")
+                f"Filtered out {duplicate_count} duplicate URLs, {len(new_entries)} new entries remaining"
+            )
 
         return new_entries
 
@@ -200,9 +221,7 @@ class NewsCollectorAgent(BaseAgent):
         return len(matched_keywords) > 0, matched_keywords
 
     async def analyze_article_relevance(
-        self,
-        title: str,
-        summary: str = ""
+        self, title: str, summary: str = ""
     ) -> tuple[bool, list[str], float]:
         """Analyze if an article is technology-related and calculate its relevance.
 
@@ -220,17 +239,18 @@ class NewsCollectorAgent(BaseAgent):
         # Use LLM if available and configured - single call for both classification and relevance
         if self.llm_analyzer is not None:
             try:
-                is_tech, topics, relevance = await self.llm_analyzer.analyze_article_relevance(
-                    title, summary
-                )
+                (
+                    is_tech,
+                    topics,
+                    relevance,
+                ) = await self.llm_analyzer.analyze_article_relevance(title, summary)
                 logger.debug(
                     f"LLM analysis for '{title[:50]}...': is_tech={is_tech}, "
                     f"topics={topics}, relevance={relevance:.2f}"
                 )
                 return is_tech, topics, relevance
             except Exception as e:
-                logger.warning(
-                    f"LLM analysis failed, falling back to keywords: {e}")
+                logger.warning(f"LLM analysis failed, falling back to keywords: {e}")
                 # Fall through to keyword-based matching
 
         # Fallback to keyword-based matching
@@ -269,9 +289,11 @@ class NewsCollectorAgent(BaseAgent):
     async def analyze_sentiment(self, text: str) -> float:
         text_lower = text.lower()
         positive_count = sum(
-            1 for word in SENTIMENT_POSITIVE_WORDS if word in text_lower)
+            1 for word in SENTIMENT_POSITIVE_WORDS if word in text_lower
+        )
         negative_count = sum(
-            1 for word in SENTIMENT_NEGATIVE_WORDS if word in text_lower)
+            1 for word in SENTIMENT_NEGATIVE_WORDS if word in text_lower
+        )
 
         total = positive_count + negative_count
         if total == 0:
@@ -280,7 +302,9 @@ class NewsCollectorAgent(BaseAgent):
         score = (positive_count - negative_count) / total
         return max(-1.0, min(1.0, score))
 
-    async def process(self, input_data: Optional[dict] = None) -> list[TechnologyMention]:
+    async def process(
+        self, input_data: Optional[dict] = None
+    ) -> list[TechnologyMention]:
         config = input_data or {}
         max_age_days = config.get("max_age_days", 7)
         custom_sources = config.get("sources", self.sources)
@@ -295,16 +319,17 @@ class NewsCollectorAgent(BaseAgent):
             print("\n📡 Fetching RSS feeds...")
         entries = await self.fetch_all_feeds()
         logger.info(
-            f"Fetched {len(entries)} total entries from {len(self.sources)} sources")
+            f"Fetched {len(entries)} total entries from {len(self.sources)} sources"
+        )
 
         if self.verbose:
             print(
-                f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources")
+                f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources"
+            )
 
         # Filter out entries with URLs that have already been collected
         entries = self.filter_new_entries(entries)
-        logger.info(
-            f"Processing {len(entries)} new entries after deduplication")
+        logger.info(f"Processing {len(entries)} new entries after deduplication")
 
         if self.verbose:
             print(f"  ✓ {len(entries)} new entries after deduplication")
@@ -320,19 +345,23 @@ class NewsCollectorAgent(BaseAgent):
                 continue
 
             if self.verbose:
-                title_preview = entry['title'][:60] + \
-                    "..." if len(entry['title']) > 60 else entry['title']
+                title_preview = (
+                    entry["title"][:60] + "..."
+                    if len(entry["title"]) > 60
+                    else entry["title"]
+                )
                 print(f"  [{idx}/{len(entries)}] Analyzing: {title_preview}")
 
             # Use combined LLM-based analysis if available, otherwise fall back to keywords
             is_tech, tech_topics, relevance = await self.analyze_article_relevance(
-                entry['title'], entry['summary']
+                entry["title"], entry["summary"]
             )
 
             if self.verbose:
                 if is_tech:
                     print(
-                        f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})")
+                        f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})"
+                    )
                 else:
                     print(f"      → Non-tech article (stored for deduplication)")
 
@@ -345,7 +374,7 @@ class NewsCollectorAgent(BaseAgent):
                     "Failed to extract article content - URL: %s, Title: %s, Source: %s",
                     entry["link"],
                     entry["title"],
-                    entry["source"]
+                    entry["source"],
                 )
 
             # Use full content for summary if available, otherwise fall back to RSS summary
@@ -361,7 +390,9 @@ class NewsCollectorAgent(BaseAgent):
                 "title": entry["title"],
                 "url": entry["link"],
                 "source": entry["source"],
-                "published_date": entry["published"].isoformat() if entry["published"] else None,
+                "published_date": entry["published"].isoformat()
+                if entry["published"]
+                else None,
                 "summary": entry["summary"] if entry["summary"] else "",
                 "content": article_content,  # Store full article content
                 "sentiment_score": sentiment,
@@ -391,56 +422,68 @@ class NewsCollectorAgent(BaseAgent):
                 if self.extract_entities and self.entity_extractor:
                     # Use unified extraction that gets technologies, companies, and countries
                     entities = await self.entity_extractor.extract_all_unified(
-                        title=entry['title'],
+                        title=entry["title"],
                         content=full_text,
-                        summary=entry.get('summary', '')
+                        summary=entry.get("summary", ""),
                     )
 
                     # Store companies and link to article
                     company_ids = []
                     company_data = []
                     for company in entities.get("companies", []):
-                        company_id = self.sqlite_store.store_company({
-                            "name": company["name"],
-                            "country": company.get("country"),
-                            "industry": company.get("industry"),
-                        })
+                        company_id = self.sqlite_store.store_company(
+                            {
+                                "name": company["name"],
+                                "country": company.get("country"),
+                                "industry": company.get("industry"),
+                            }
+                        )
                         company_ids.append(company_id)
-                        company_data.append({
-                            "company_id": company_id,
-                            "relevance": company.get("relevance", 0.5),
-                            "context": company.get("context", ""),
-                        })
+                        company_data.append(
+                            {
+                                "company_id": company_id,
+                                "relevance": company.get("relevance", 0.5),
+                                "context": company.get("context", ""),
+                            }
+                        )
 
                     # Store countries and link to article
                     country_ids = []
                     country_data = []
                     for country in entities.get("countries", []):
-                        country_id = self.sqlite_store.store_country({
-                            "name": country["name"],
-                            "code": country.get("code"),
-                        })
+                        country_id = self.sqlite_store.store_country(
+                            {
+                                "name": country["name"],
+                                "code": country.get("code"),
+                            }
+                        )
                         country_ids.append(country_id)
-                        country_data.append({
-                            "country_id": country_id,
-                            "relevance": country.get("relevance", 0.5),
-                            "context": country.get("context", ""),
-                        })
+                        country_data.append(
+                            {
+                                "country_id": country_id,
+                                "relevance": country.get("relevance", 0.5),
+                                "context": country.get("context", ""),
+                            }
+                        )
 
                     # Store technologies and link to article
                     technology_ids = []
                     technology_data = []
                     for tech in entities.get("technologies", []):
-                        technology_id = self.sqlite_store.store_technology({
-                            "name": tech["name"],
-                            "category": tech.get("category", "General Technology"),
-                        })
+                        technology_id = self.sqlite_store.store_technology(
+                            {
+                                "name": tech["name"],
+                                "category": tech.get("category", "General Technology"),
+                            }
+                        )
                         technology_ids.append(technology_id)
-                        technology_data.append({
-                            "technology_id": technology_id,
-                            "relevance": tech.get("relevance", 0.5),
-                            "context": tech.get("context", ""),
-                        })
+                        technology_data.append(
+                            {
+                                "technology_id": technology_id,
+                                "relevance": tech.get("relevance", 0.5),
+                                "context": tech.get("context", ""),
+                            }
+                        )
 
                     # Link article with companies
                     if company_ids:
@@ -460,14 +503,17 @@ class NewsCollectorAgent(BaseAgent):
                             article_id, technology_ids, technology_data
                         )
 
-        technology_mentions.sort(key=lambda x: (
-            x.relevance_score, x.published_date), reverse=True)
+        technology_mentions.sort(
+            key=lambda x: (x.relevance_score, x.published_date), reverse=True
+        )
 
         self.send_message(
             recipient="TechnologyAnalyzerAgent",
             message_type="news_mentions",
             content={
-                "mentions": [mention.model_dump(mode="json") for mention in technology_mentions],
+                "mentions": [
+                    mention.model_dump(mode="json") for mention in technology_mentions
+                ],
                 "count": len(technology_mentions),
                 "collected_at": datetime.now().isoformat(),
                 "stored_article_ids": stored_article_ids,
