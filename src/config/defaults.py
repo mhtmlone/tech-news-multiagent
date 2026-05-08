@@ -28,58 +28,130 @@ DEFAULT_RSS_SOURCES = [
 # Default technology keywords for filtering
 DEFAULT_TECH_KEYWORDS = [
     # AI/ML
-    "AI", "artificial intelligence", "machine learning", "deep learning",
-    "neural network", "LLM", "large language model", "transformer",
-    "diffusion model", "generative AI", "computer vision", "NLP",
-    "RAG", "agent", "multi-agent", "GPT", "ChatGPT", "Claude", "Gemini",
-    "OpenAI", "Anthropic", "Hugging Face",
-    
+    "AI",
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "neural network",
+    "LLM",
+    "large language model",
+    "transformer",
+    "diffusion model",
+    "generative AI",
+    "computer vision",
+    "NLP",
+    "RAG",
+    "agent",
+    "multi-agent",
+    "GPT",
+    "ChatGPT",
+    "Claude",
+    "Gemini",
+    "OpenAI",
+    "Anthropic",
+    "Hugging Face",
     # Quantum Computing
-    "quantum computing", "quantum", "qubit", "quantum supremacy",
-    "quantum error correction", "IBM Quantum", "Google Quantum",
-    
+    "quantum computing",
+    "quantum",
+    "qubit",
+    "quantum supremacy",
+    "quantum error correction",
+    "IBM Quantum",
+    "Google Quantum",
     # Blockchain/Web3
-    "blockchain", "cryptocurrency", "web3", "crypto", "NFT", "DeFi",
-    "smart contract", "Bitcoin", "Ethereum", "Solana",
-    
+    "blockchain",
+    "cryptocurrency",
+    "web3",
+    "crypto",
+    "NFT",
+    "DeFi",
+    "smart contract",
+    "Bitcoin",
+    "Ethereum",
+    "Solana",
     # Robotics
-    "robotics", "robot", "autonomous", "humanoid", "automation",
-    "Boston Dynamics", "Tesla Optimus",
-    
+    "robotics",
+    "robot",
+    "autonomous",
+    "humanoid",
+    "automation",
+    "Boston Dynamics",
+    "Tesla Optimus",
     # Cloud/Infrastructure
-    "cloud computing", "edge computing", "serverless", "kubernetes",
-    "microservices", "devops", "API", "AWS", "Azure", "Google Cloud",
-    
+    "cloud computing",
+    "edge computing",
+    "serverless",
+    "kubernetes",
+    "microservices",
+    "devops",
+    "API",
+    "AWS",
+    "Azure",
+    "Google Cloud",
     # Cybersecurity
-    "cybersecurity", "zero trust", "encryption", "authentication",
-    "security", "data breach", "hacking",
-    
+    "cybersecurity",
+    "zero trust",
+    "encryption",
+    "authentication",
+    "security",
+    "data breach",
+    "hacking",
     # Telecommunications
-    "5G", "6G", "telecommunications", "network", "Starlink",
-    
+    "5G",
+    "6G",
+    "telecommunications",
+    "network",
+    "Starlink",
     # IoT
-    "IoT", "Internet of Things", "sensor", "connected devices",
-    
+    "IoT",
+    "Internet of Things",
+    "sensor",
+    "connected devices",
     # AR/VR/MR
-    "augmented reality", "virtual reality", "AR", "VR", "mixed reality",
-    "metaverse", "Apple Vision Pro", "Meta Quest",
-    
+    "augmented reality",
+    "virtual reality",
+    "AR",
+    "VR",
+    "mixed reality",
+    "metaverse",
+    "Apple Vision Pro",
+    "Meta Quest",
     # Biotech
-    "biotech", "gene editing", "CRISPR", "synthetic biology",
-    "biomedical", "mRNA",
-    
+    "biotech",
+    "gene editing",
+    "CRISPR",
+    "synthetic biology",
+    "biomedical",
+    "mRNA",
     # Energy/Cleantech
-    "battery technology", "renewable energy", "solar", "fusion",
-    "hydrogen fuel", "carbon capture", "climate tech", "EV", "electric vehicle",
-    
+    "battery technology",
+    "renewable energy",
+    "solar",
+    "fusion",
+    "hydrogen fuel",
+    "carbon capture",
+    "climate tech",
+    "EV",
+    "electric vehicle",
     # Semiconductors
-    "semiconductor", "chip", "processor", "GPU", "NVIDIA", "AMD", "Intel",
-    "TSMC", "ARM", "RISC-V",
-    
+    "semiconductor",
+    "chip",
+    "processor",
+    "GPU",
+    "NVIDIA",
+    "AMD",
+    "Intel",
+    "TSMC",
+    "ARM",
+    "RISC-V",
     # Software Development
-    "software development", "programming", "developer", "API",
-    "open source", "GitHub", "GitLab",
-    
+    "software development",
+    "programming",
+    "developer",
+    "API",
+    "open source",
+    "GitHub",
+    "GitLab",
     # Additional emerging technologies
     "natural language processing",
     "autonomous vehicle",
@@ -106,13 +178,14 @@ DEFAULT_LLM_MODELS = {
     "openrouter": "qwen/qwen3.5-27b",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
+    "ollama": "qwen3.5:397b-cloud",
 }
 
-# Fallback models for 40x errors (provider-specific defaults)
 DEFAULT_FALLBACK_MODELS = {
     "openrouter": "anthropic/claude-3-haiku",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
+    "ollama": "qwen3.5:397b-cloud",
 }
 
 # Default LLM temperature
@@ -244,10 +317,40 @@ SENTIMENT_NEGATIVE_WORDS = [
 
 # Theme keywords for report generation
 THEME_KEYWORDS = {
-    "Artificial Intelligence": ["AI", "artificial intelligence", "machine learning", "deep learning", "neural network", "LLM", "GPT"],
-    "Cloud Computing": ["cloud", "AWS", "Azure", "Google Cloud", "kubernetes", "serverless"],
-    "Cybersecurity": ["security", "cyber", "hack", "breach", "encryption", "zero trust"],
-    "Semiconductors": ["chip", "semiconductor", "processor", "GPU", "NVIDIA", "Intel", "AMD"],
+    "Artificial Intelligence": [
+        "AI",
+        "artificial intelligence",
+        "machine learning",
+        "deep learning",
+        "neural network",
+        "LLM",
+        "GPT",
+    ],
+    "Cloud Computing": [
+        "cloud",
+        "AWS",
+        "Azure",
+        "Google Cloud",
+        "kubernetes",
+        "serverless",
+    ],
+    "Cybersecurity": [
+        "security",
+        "cyber",
+        "hack",
+        "breach",
+        "encryption",
+        "zero trust",
+    ],
+    "Semiconductors": [
+        "chip",
+        "semiconductor",
+        "processor",
+        "GPU",
+        "NVIDIA",
+        "Intel",
+        "AMD",
+    ],
     "Blockchain/Web3": ["blockchain", "crypto", "bitcoin", "ethereum", "web3", "NFT"],
     "Quantum Computing": ["quantum", "qubit", "quantum computing"],
     "Robotics": ["robot", "robotics", "autonomous", "drone"],
@@ -261,61 +364,94 @@ THEME_KEYWORDS = {
 # Technology categories with keywords
 TECH_CATEGORIES = {
     "AI/ML": [
-        "AI", "artificial intelligence", "machine learning", "deep learning",
-        "neural network", "LLM", "large language model", "transformer",
-        "diffusion model", "generative AI", "computer vision", "NLP",
-        "RAG", "agent", "multi-agent", "GPT", "Claude", "Gemini"
+        "AI",
+        "artificial intelligence",
+        "machine learning",
+        "deep learning",
+        "neural network",
+        "LLM",
+        "large language model",
+        "transformer",
+        "diffusion model",
+        "generative AI",
+        "computer vision",
+        "NLP",
+        "RAG",
+        "agent",
+        "multi-agent",
+        "GPT",
+        "Claude",
+        "Gemini",
     ],
-    "Quantum Computing": [
-        "quantum computing", "quantum", "qubit", "quantum supremacy"
-    ],
+    "Quantum Computing": ["quantum computing", "quantum", "qubit", "quantum supremacy"],
     "Blockchain/Web3": [
-        "blockchain", "cryptocurrency", "web3", "crypto", "NFT", "DeFi",
-        "smart contract", "Bitcoin", "Ethereum"
+        "blockchain",
+        "cryptocurrency",
+        "web3",
+        "crypto",
+        "NFT",
+        "DeFi",
+        "smart contract",
+        "Bitcoin",
+        "Ethereum",
     ],
-    "Robotics": [
-        "robotics", "robot", "autonomous", "humanoid", "automation"
-    ],
+    "Robotics": ["robotics", "robot", "autonomous", "humanoid", "automation"],
     "Cloud/Infrastructure": [
-        "cloud computing", "edge computing", "serverless", "kubernetes",
-        "microservices", "devops", "API", "AWS", "Azure", "Google Cloud"
+        "cloud computing",
+        "edge computing",
+        "serverless",
+        "kubernetes",
+        "microservices",
+        "devops",
+        "API",
+        "AWS",
+        "Azure",
+        "Google Cloud",
     ],
     "Cybersecurity": [
-        "cybersecurity", "zero trust", "encryption", "authentication",
-        "security", "hacking", "vulnerability"
+        "cybersecurity",
+        "zero trust",
+        "encryption",
+        "authentication",
+        "security",
+        "hacking",
+        "vulnerability",
     ],
-    "Telecommunications": [
-        "5G", "6G", "telecommunications", "network"
-    ],
-    "IoT": [
-        "IoT", "Internet of Things", "sensor", "connected"
-    ],
+    "Telecommunications": ["5G", "6G", "telecommunications", "network"],
+    "IoT": ["IoT", "Internet of Things", "sensor", "connected"],
     "AR/VR/MR": [
-        "augmented reality", "virtual reality", "AR", "VR",
-        "mixed reality", "metaverse", "XR"
+        "augmented reality",
+        "virtual reality",
+        "AR",
+        "VR",
+        "mixed reality",
+        "metaverse",
+        "XR",
     ],
-    "Biotech": [
-        "biotech", "gene editing", "CRISPR", "synthetic biology", "biomedical"
-    ],
+    "Biotech": ["biotech", "gene editing", "CRISPR", "synthetic biology", "biomedical"],
     "Energy/Cleantech": [
-        "battery technology", "renewable energy", "solar", "fusion",
-        "hydrogen fuel", "carbon capture", "climate tech", "electric vehicle", "EV"
+        "battery technology",
+        "renewable energy",
+        "solar",
+        "fusion",
+        "hydrogen fuel",
+        "carbon capture",
+        "climate tech",
+        "electric vehicle",
+        "EV",
     ],
     "Semiconductors": [
-        "semiconductor", "chip", "processor", "GPU", "TPU", "neuromorphic"
+        "semiconductor",
+        "chip",
+        "processor",
+        "GPU",
+        "TPU",
+        "neuromorphic",
     ],
-    "Hardware/Interfaces": [
-        "brain-computer interface", "wearable", "hardware"
-    ],
-    "Space Tech": [
-        "space technology", "satellite", "rocket", "spaceX"
-    ],
-    "Manufacturing": [
-        "3D printing", "additive manufacturing", "nanotechnology"
-    ],
-    "Materials": [
-        "material science", "graphene", "superconductor"
-    ],
+    "Hardware/Interfaces": ["brain-computer interface", "wearable", "hardware"],
+    "Space Tech": ["space technology", "satellite", "rocket", "spaceX"],
+    "Manufacturing": ["3D printing", "additive manufacturing", "nanotechnology"],
+    "Materials": ["material science", "graphene", "superconductor"],
 }
 
 # =============================================================================

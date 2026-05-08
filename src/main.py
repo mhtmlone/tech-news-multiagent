@@ -21,6 +21,7 @@ from .agents.memory_manager import MemoryManagerAgent
 from .agents.development_tracker import DevelopmentTrackerAgent
 from .agents.report_generator import ReportGeneratorAgent
 from .agents.base import AgentOrchestrator
+from .config.llm_config import LLMConfig
 
 
 console = Console()
@@ -28,28 +29,27 @@ console = Console()
 
 class TechNewsMultiAgentSystem:
     def __init__(
-        self, 
+        self,
         memory_dir: Optional[str] = None,
         sqlite_path: Optional[str] = None,
         report_dir: Optional[str] = None,
-        use_llm: bool = True
+        use_llm: bool = True,
     ):
         self.memory_dir = memory_dir or "./memory_db"
         self.sqlite_path = sqlite_path or "./data/news_content.db"
         self.report_dir = report_dir or "./reports"
         self.use_llm = use_llm
-        
+
         # Initialize storage
         self.memory = VectorMemory(persist_directory=self.memory_dir)
         self.sqlite_store = SQLiteStore(db_path=self.sqlite_path)
-        
+
         # Initialize orchestrator
         self.orchestrator = AgentOrchestrator(memory=self.memory)
 
         # Initialize agents with SQLite store
         self.news_collector = NewsCollectorAgent(
-            memory=self.memory,
-            sqlite_store=self.sqlite_store
+            memory=self.memory, sqlite_store=self.sqlite_store
         )
         self.tech_analyzer = TechnologyAnalyzerAgent(memory=self.memory)
         self.memory_manager = MemoryManagerAgent(memory=self.memory)
@@ -57,8 +57,10 @@ class TechNewsMultiAgentSystem:
         self.report_generator = ReportGeneratorAgent(
             sqlite_store=self.sqlite_store,
             report_dir=self.report_dir,
-            use_llm=self.use_llm
+            use_llm=self.use_llm,
         )
+
+        self._check_llm_connectivity()
 
         self._register_agents()
 
@@ -68,6 +70,51 @@ class TechNewsMultiAgentSystem:
         self.orchestrator.register_agent(self.memory_manager)
         self.orchestrator.register_agent(self.dev_tracker)
         self.orchestrator.register_agent(self.report_generator)
+
+    def _check_llm_connectivity(self):
+        provider = LLMConfig.get_provider()
+        base_url = LLMConfig.get_base_url()
+        model = LLMConfig.get_model("news_collector")
+
+        if provider == "none" or not base_url:
+            console.print(
+                "[dim]ℹ[/dim] LLM disabled (set LLM_PROVIDER and LLM_BASE_URL to enable)"
+            )
+            return
+
+        from .utils.llm_analyzer import LLMAnalyzer
+        from langchain_core.output_parsers import StrOutputParser
+        import asyncio
+        import threading
+
+        try:
+            llm_kwargs = LLMConfig.create_llm_kwargs("news_collector")
+            llm = LLMAnalyzer(**llm_kwargs, verbose=False)
+            chain = llm._get_llm() | StrOutputParser()
+
+            async def send_test():
+                return await chain.ainvoke("Is LLM sentient? Answer in one sentence.")
+
+            def run_in_thread():
+                return asyncio.run(send_test())
+
+            result = [None]
+
+            def run_in_thread():
+                result[0] = asyncio.run(send_test())
+
+            t = threading.Thread(target=run_in_thread)
+            t.start()
+            t.join(timeout=60)
+            if t.is_alive():
+                console.print(f"[yellow]⚠[/yellow] LLM connection timed out")
+            else:
+                response = result[0]
+                console.print(
+                    f'[green]✓[/green] LLM connected: {provider} / {model} — "{response[:80]}{"..." if len(response) > 80 else ""}"'
+                )
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] LLM connection failed: {str(e)[:100]}")
 
     async def run_analysis(
         self,
@@ -92,7 +139,7 @@ class TechNewsMultiAgentSystem:
 
         if verbose:
             console.print("\n[bold]Step 1/5:[/bold] Collecting news articles...")
-        
+
         # Set verbose mode on news collector for detailed progress
         self.news_collector.verbose = verbose
         if self.news_collector.llm_analyzer:
@@ -171,33 +218,35 @@ class TechNewsMultiAgentSystem:
         if generate_report:
             if verbose:
                 console.print("\n[bold]Step 5/5:[/bold] Generating report...")
-            
+
             # Set verbose mode on report generator for LLM timing output
             self.report_generator.verbose = verbose
             if self.report_generator.llm_analyzer:
                 self.report_generator.llm_analyzer.verbose = verbose
                 if verbose:
-                    console.print("    [dim]⏱️  LLM timing enabled for report generator[/dim]")
-            
+                    console.print(
+                        "    [dim]⏱️  LLM timing enabled for report generator[/dim]"
+                    )
+
             all_technologies = (
-                analysis_result["new_technologies"] + 
-                analysis_result["updated_technologies"]
+                analysis_result["new_technologies"]
+                + analysis_result["updated_technologies"]
             )
-            
-            report = await self.report_generator.process({
-                "period_start": period_start,
-                "period_end": period_end,
-                "technologies": [t.model_dump(mode="json") for t in all_technologies],
-                "developments": tracking_result,
-            })
-            
+
+            report = await self.report_generator.process(
+                {
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "technologies": [
+                        t.model_dump(mode="json") for t in all_technologies
+                    ],
+                    "developments": tracking_result,
+                }
+            )
+
             if verbose:
-                console.print(
-                    f"[green]✓[/green] Generated report: {report.file_path}"
-                )
-                console.print(
-                    f"[green]✓[/green] Report ID: {report.id}"
-                )
+                console.print(f"[green]✓[/green] Generated report: {report.file_path}")
+                console.print(f"[green]✓[/green] Report ID: {report.id}")
 
         return {
             "news_collected": len(news_mentions),
@@ -222,7 +271,9 @@ class TechNewsMultiAgentSystem:
 
         if results["new_technologies"]:
             console.print("\n[bold yellow]New Technologies Detected:[/bold yellow]")
-            table = Table(show_header=True, header_style="bold magenta", box=box.ROUNDED)
+            table = Table(
+                show_header=True, header_style="bold magenta", box=box.ROUNDED
+            )
             table.add_column("Name", style="cyan")
             table.add_column("Category", style="green")
             table.add_column("Confidence", justify="right")
@@ -239,7 +290,9 @@ class TechNewsMultiAgentSystem:
 
         if results["promising_technologies"]:
             console.print("\n[bold yellow]Most Promising Technologies:[/bold yellow]")
-            table = Table(show_header=True, header_style="bold magenta", box=box.ROUNDED)
+            table = Table(
+                show_header=True, header_style="bold magenta", box=box.ROUNDED
+            )
             table.add_column("Name", style="cyan")
             table.add_column("Status", style="green")
             table.add_column("Trend", style="blue")
@@ -267,7 +320,7 @@ class TechNewsMultiAgentSystem:
                     for dev in tech.key_developments[:3]:
                         branch.add(f"[green]•[/green] {dev}")
             console.print(tree)
-        
+
         # Display report info if available
         if results.get("report"):
             report = results["report"]
@@ -318,25 +371,21 @@ class TechNewsMultiAgentSystem:
         tech_data = history["technology"]
         console.print(f"\n[bold]Category:[/bold] {tech_data.get('category', 'N/A')}")
         console.print(f"[bold]Status:[/bold] {tech_data.get('status', 'N/A')}")
-        console.print(
-            f"[bold]Trend:[/bold] {tech_data.get('trend_direction', 'N/A')}"
-        )
+        console.print(f"[bold]Trend:[/bold] {tech_data.get('trend_direction', 'N/A')}")
         console.print(
             f"[bold]Confidence:[/bold] {tech_data.get('confidence_score', 0):.2f}"
         )
-        console.print(
-            f"[bold]Hype Level:[/bold] {tech_data.get('hype_level', 0):.2f}"
-        )
+        console.print(f"[bold]Hype Level:[/bold] {tech_data.get('hype_level', 0):.2f}")
 
         if history["developments"]:
-            console.print(f"\n[bold]Key Developments ({len(history['developments'])}):[/bold]")
+            console.print(
+                f"\n[bold]Key Developments ({len(history['developments'])}):[/bold]"
+            )
             for dev in history["developments"][:10]:
                 console.print(f"  • {dev.get('development', 'N/A')}")
 
         if history["mentions"]:
-            console.print(
-                f"\n[bold]Recent News ({len(history['mentions'])}):[/bold]"
-            )
+            console.print(f"\n[bold]Recent News ({len(history['mentions'])}):[/bold]")
             for mention in history["mentions"][:5]:
                 console.print(
                     f"  • {mention.get('title', 'N/A')} "
@@ -344,9 +393,7 @@ class TechNewsMultiAgentSystem:
                 )
 
         if history["similar_technologies"]:
-            console.print(
-                f"\n[bold]Similar Technologies:[/bold]"
-            )
+            console.print(f"\n[bold]Similar Technologies:[/bold]")
             for similar in history["similar_technologies"]:
                 console.print(
                     f"  • {similar.get('name', 'N/A')} "
@@ -393,9 +440,7 @@ class TechNewsMultiAgentSystem:
             report.append(f"  {status}: {count}")
         report.append("")
 
-        trending = [
-            t for t in all_techs if t.get("trend_direction") == "rising"
-        ]
+        trending = [t for t in all_techs if t.get("trend_direction") == "rising"]
         if trending:
             report.append("Trending Technologies:")
             for tech in trending[:10]:
@@ -411,8 +456,7 @@ class TechNewsMultiAgentSystem:
             report.append("Highest Hype Level:")
             for tech in high_hype:
                 report.append(
-                    f"  • {tech.get('name', 'N/A')}: "
-                    f"{tech.get('hype_level', 0):.2f}"
+                    f"  • {tech.get('name', 'N/A')}: {tech.get('hype_level', 0):.2f}"
                 )
             report.append("")
 
