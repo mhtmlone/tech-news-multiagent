@@ -300,57 +300,31 @@ class NewsCollectorAgent(BaseAgent):
         score = (positive_count - negative_count) / total
         return max(-1.0, min(1.0, score))
 
-    async def process(
-        self, input_data: Optional[dict] = None
-    ) -> list[TechnologyMention]:
-        config = input_data or {}
-        max_age_days = config.get("max_age_days", 7)
-        custom_sources = config.get("sources", self.sources)
+    async def _process_single_entry(
+        self,
+        entry: dict,
+        idx: int,
+        total: int,
+        cutoff_date: datetime,
+        semaphore: asyncio.Semaphore,
+    ) -> Optional[dict]:
+        """Process a single entry: analyze, fetch content, store, and return result data.
 
-        if custom_sources:
-            self.sources = custom_sources
+        Returns a dict with keys: mention, article_id, article_data
+        or None if the entry is skipped (too old).
+        """
+        if entry["published"] and entry["published"] < cutoff_date:
+            return None
 
-        cutoff_date = datetime.now() - timedelta(days=max_age_days)
-
-        # Fetch all RSS feed entries
-        if self.verbose:
-            print("\n📡 Fetching RSS feeds...")
-        entries = await self.fetch_all_feeds()
-        logger.info(
-            f"Fetched {len(entries)} total entries from {len(self.sources)} sources"
-        )
-
-        if self.verbose:
-            print(
-                f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources"
-            )
-
-        # Filter out entries with URLs that have already been collected
-        entries = self.filter_new_entries(entries)
-        logger.info(f"Processing {len(entries)} new entries after deduplication")
-
-        if self.verbose:
-            print(f"  ✓ {len(entries)} new entries after deduplication")
-
-        technology_mentions = []
-        stored_article_ids = []
-
-        if self.verbose and entries:
-            print(f"\n📰 Processing {len(entries)} articles...")
-
-        for idx, entry in enumerate(entries, 1):
-            if entry["published"] and entry["published"] < cutoff_date:
-                continue
-
+        async with semaphore:
             if self.verbose:
                 title_preview = (
                     entry["title"][:60] + "..."
                     if len(entry["title"]) > 60
                     else entry["title"]
                 )
-                print(f"  [{idx}/{len(entries)}] Analyzing: {title_preview}")
+                print(f"  [{idx}/{total}] Analyzing: {title_preview}")
 
-            # Use combined LLM-based analysis if available, otherwise fall back to keywords
             is_tech, tech_topics, relevance = await self.analyze_article_relevance(
                 entry["title"], entry["summary"]
             )
@@ -361,12 +335,10 @@ class NewsCollectorAgent(BaseAgent):
                         f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})"
                     )
                 else:
-                    print(f"      → Non-tech article (stored for deduplication)")
+                    print("      → Non-tech article (stored for deduplication)")
 
-            # Fetch full article content
             article_content = await self.fetch_article_content(entry["link"])
 
-            # Log articles where content extraction failed
             if not article_content:
                 logger.warning(
                     "Failed to extract article content - URL: %s, Title: %s, Source: %s",
@@ -375,14 +347,11 @@ class NewsCollectorAgent(BaseAgent):
                     entry["source"],
                 )
 
-            # Use full content for summary if available, otherwise fall back to RSS summary
             full_text = article_content if article_content else entry["summary"]
             summary_for_mention = full_text if full_text else ""
 
             sentiment = await self.analyze_sentiment(full_text)
 
-            # Store ALL articles in SQLite for deduplication purposes
-            # This ensures we don't re-process non-tech or low-relevance articles
             article_data = {
                 "id": str(uuid.uuid4()),
                 "title": entry["title"],
@@ -392,17 +361,16 @@ class NewsCollectorAgent(BaseAgent):
                 if entry["published"]
                 else None,
                 "summary": entry["summary"] if entry["summary"] else "",
-                "content": article_content,  # Store full article content
+                "content": article_content,
                 "sentiment_score": sentiment,
                 "relevance_score": relevance,
-                "is_tech_related": is_tech,  # Track whether article is tech-related
-                "keywords": tech_topics,  # Technology topics identified by LLM or keyword matching
+                "is_tech_related": is_tech,
+                "keywords": tech_topics,
             }
 
             article_id = self.sqlite_store.store_article(article_data)
-            stored_article_ids.append(article_id)
 
-            # Only create technology mentions and extract entities for tech-related articles
+            mention = None
             if is_tech and relevance >= 0.1:
                 mention = TechnologyMention(
                     source=entry["source"],
@@ -414,18 +382,13 @@ class NewsCollectorAgent(BaseAgent):
                     relevance_score=relevance,
                 )
 
-                technology_mentions.append(mention)
-
-                # Extract and store entities from full content using unified extraction
                 if self.extract_entities and self.entity_extractor:
-                    # Use unified extraction that gets technologies, companies, and countries
                     entities = await self.entity_extractor.extract_all_unified(
                         title=entry["title"],
                         content=full_text,
                         summary=entry.get("summary", ""),
                     )
 
-                    # Store companies and link to article
                     company_ids = []
                     company_data = []
                     for company in entities.get("companies", []):
@@ -445,7 +408,6 @@ class NewsCollectorAgent(BaseAgent):
                             }
                         )
 
-                    # Store countries and link to article
                     country_ids = []
                     country_data = []
                     for country in entities.get("countries", []):
@@ -464,7 +426,6 @@ class NewsCollectorAgent(BaseAgent):
                             }
                         )
 
-                    # Store technologies and link to article
                     technology_ids = []
                     technology_data = []
                     for tech in entities.get("technologies", []):
@@ -483,23 +444,77 @@ class NewsCollectorAgent(BaseAgent):
                             }
                         )
 
-                    # Link article with companies
                     if company_ids:
                         self.sqlite_store.link_article_companies(
                             article_id, company_ids, company_data
                         )
-
-                    # Link article with countries
                     if country_ids:
                         self.sqlite_store.link_article_countries(
                             article_id, country_ids, country_data
                         )
-
-                    # Link article with technologies
                     if technology_ids:
                         self.sqlite_store.link_article_technologies(
                             article_id, technology_ids, technology_data
                         )
+
+            return {"mention": mention, "article_id": article_id}
+
+    async def process(
+        self, input_data: Optional[dict] = None
+    ) -> list[TechnologyMention]:
+        config = input_data or {}
+        max_age_days = config.get("max_age_days", 7)
+        custom_sources = config.get("sources", self.sources)
+
+        if custom_sources:
+            self.sources = custom_sources
+
+        cutoff_date = datetime.now() - timedelta(days=max_age_days)
+
+        if self.verbose:
+            print("\n📡 Fetching RSS feeds...")
+        entries = await self.fetch_all_feeds()
+        logger.info(
+            f"Fetched {len(entries)} total entries from {len(self.sources)} sources"
+        )
+
+        if self.verbose:
+            print(
+                f"  ✓ Fetched {len(entries)} total entries from {len(self.sources)} sources"
+            )
+
+        entries = self.filter_new_entries(entries)
+        logger.info(f"Processing {len(entries)} new entries after deduplication")
+
+        if self.verbose:
+            print(f"  ✓ {len(entries)} new entries after deduplication")
+
+        technology_mentions = []
+        stored_article_ids = []
+
+        if self.verbose and entries:
+            max_concurrent = self.rss_config.get_max_concurrent_articles()
+            print(
+                f"\n📰 Processing {len(entries)} articles (max {max_concurrent} concurrent)..."
+            )
+
+        semaphore = asyncio.Semaphore(self.rss_config.get_max_concurrent_articles())
+
+        tasks = [
+            self._process_single_entry(entry, idx, len(entries), cutoff_date, semaphore)
+            for idx, entry in enumerate(entries, 1)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Error processing entry: {result}")
+                continue
+            if result is None:
+                continue
+            stored_article_ids.append(result["article_id"])
+            if result["mention"] is not None:
+                technology_mentions.append(result["mention"])
 
         technology_mentions.sort(
             key=lambda x: (x.relevance_score, x.published_date), reverse=True

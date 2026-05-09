@@ -16,6 +16,7 @@ from .defaults import (
     DEFAULT_TECH_KEYWORDS,
     DEFAULT_HTTP_TIMEOUT,
     DEFAULT_FAILURE_LOG_PATH,
+    DEFAULT_MAX_CONCURRENT_ARTICLES,
 )
 
 # Load environment variables
@@ -171,6 +172,23 @@ class RSSConfig:
             Path to the failure log file.
         """
         return os.getenv("RSS_LOG_FILE", DEFAULT_FAILURE_LOG_PATH)
+
+    @classmethod
+    def get_max_concurrent_articles(cls) -> int:
+        """Get max concurrent article processing tasks.
+
+        Returns:
+            Maximum number of articles to process concurrently.
+        """
+        try:
+            return int(
+                os.getenv(
+                    "RSS_MAX_CONCURRENT_ARTICLES",
+                    str(DEFAULT_MAX_CONCURRENT_ARTICLES),
+                )
+            )
+        except ValueError:
+            return DEFAULT_MAX_CONCURRENT_ARTICLES
 
     @classmethod
     def validate_sources(cls, sources: List[str]) -> List[str]:

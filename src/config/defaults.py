@@ -211,6 +211,9 @@ LLM_FUNCTION_MODEL_VARS = {
 # Default HTTP timeout in seconds
 DEFAULT_HTTP_TIMEOUT = 30
 
+# Default max concurrent article processing tasks
+DEFAULT_MAX_CONCURRENT_ARTICLES = 4
+
 # Default user agent for HTTP requests
 DEFAULT_USER_AGENT = "TechNews-MultiAgent/1.0"
 
