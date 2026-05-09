@@ -57,8 +57,7 @@ class ReportGeneratorAgent(BaseAgent):
                 self.use_llm = False
 
         llm_status = (
-            f"enabled (provider={LLMConfig.get_provider()}, "
-            f"model={LLMConfig.get_model('report_generator')})"
+            f"enabled (model={LLMConfig.get_model('report_generator')})"
             if self.llm_analyzer
             else "disabled (using template-based fallback)"
         )

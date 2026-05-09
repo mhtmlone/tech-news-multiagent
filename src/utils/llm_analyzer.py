@@ -22,7 +22,7 @@ class LLMAnalyzer:
         temperature: float = 0.7,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         """Initialize the LLM analyzer.
 
@@ -41,7 +41,7 @@ class LLMAnalyzer:
         llm_kwargs = {
             "model": effective_model,
             "api_key": api_key or os.getenv("OPENAI_API_KEY"),
-            "temperature": temperature
+            "temperature": temperature,
         }
 
         # Add base_url if provided
@@ -53,12 +53,22 @@ class LLMAnalyzer:
         self.output_parser = StrOutputParser()
         self.verbose = verbose
         self._model_name = effective_model
-        self._llm_cache: dict[str, ChatOpenAI] = {}  # Cache for different model instances
-        self._fallback_model: Optional[str] = None  # Lazy-loaded fallback model
+        # Cache for different model instances
+        self._llm_cache: dict[str, ChatOpenAI] = {}
+        # Lazy-loaded fallback model
+        self._fallback_model: Optional[str] = None
         if verbose:
-            print(f"    ⏱️  LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})")
+            print(
+                f"    ⏱️  LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})"
+            )
 
-    def _get_llm(self, model: Optional[str] = None, function_name: Optional[str] = None, base_url: Optional[str] = None, api_key: Optional[str] = None) -> ChatOpenAI:
+    def _get_llm(
+        self,
+        model: Optional[str] = None,
+        function_name: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> ChatOpenAI:
         """Get or create an LLM instance for the specified model.
 
         Args:
@@ -73,8 +83,10 @@ class LLMAnalyzer:
         """
         # Determine the effective base URL and API key
         effective_base_url = base_url if base_url is not None else self.base_url
-        effective_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
-        
+        effective_api_key = (
+            api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
+        )
+
         # If explicit model provided, use it (or create cached instance for it)
         if model is not None:
             # Create a cache key that includes the base URL and API key to handle different endpoints
@@ -84,13 +96,15 @@ class LLMAnalyzer:
                 llm_kwargs = {
                     "model": model,
                     "api_key": effective_api_key,
-                    "temperature": 0.7
+                    "temperature": 0.7,
                 }
                 if effective_base_url:
                     llm_kwargs["base_url"] = effective_base_url
                 self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
                 if self.verbose:
-                    print(f"    ⏱️  Created new LLM instance for model: {model} (base_url: {effective_base_url or 'default'})")
+                    print(
+                        f"    ⏱️  Created new LLM instance for model: {model} (base_url: {effective_base_url or 'default'})"
+                    )
             return self._llm_cache[cache_key]
 
         # No explicit model - check for function-specific model from env vars
@@ -102,13 +116,15 @@ class LLMAnalyzer:
                     llm_kwargs = {
                         "model": env_model,
                         "api_key": effective_api_key,
-                        "temperature": 0.7
+                        "temperature": 0.7,
                     }
                     if effective_base_url:
                         llm_kwargs["base_url"] = effective_base_url
                     self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
                     if self.verbose:
-                        print(f"    ⏱️  Created new LLM instance for function-specific model: {function_name} -> {env_model}")
+                        print(
+                            f"    ⏱️  Created new LLM instance for function-specific model: {function_name} -> {env_model}"
+                        )
                 return self._llm_cache[cache_key]
 
         # Fall back to default LLM
@@ -116,25 +132,25 @@ class LLMAnalyzer:
 
     def _get_fallback_model(self) -> Optional[str]:
         """Get the fallback model for 40x error retries.
-        
+
         Returns:
             Fallback model name or None if not configured.
         """
         if self._fallback_model is None:
             self._fallback_model = LLMConfig.get_fallback_model()
         return self._fallback_model
-    
+
     def _get_fallback_base_url(self) -> Optional[str]:
         """Get the fallback base URL for 40x error retries.
-        
+
         Returns:
             Fallback base URL or None to use the primary base URL.
         """
         return LLMConfig.get_fallback_base_url()
-    
+
     def _get_fallback_api_key(self) -> Optional[str]:
         """Get the fallback API key for 40x error retries.
-        
+
         Returns:
             Fallback API key or None to use the primary API key.
         """
@@ -142,23 +158,37 @@ class LLMAnalyzer:
 
     def _is_40x_error(self, error: Exception) -> bool:
         """Check if an exception is a 40x HTTP error.
-        
+
         Args:
             error: The exception to check.
-            
+
         Returns:
             True if it's a 40x error, False otherwise.
         """
         error_str = str(error).lower()
         # Check for common 40x error patterns
         error_patterns = [
-            "401", "403", "404", "429",  # Specific status codes
-            "unauthorized", "forbidden", "not found", "rate limit",
-            "too many requests", "invalid request",
+            "401",
+            "403",
+            "404",
+            "429",  # Specific status codes
+            "unauthorized",
+            "forbidden",
+            "not found",
+            "rate limit",
+            "too many requests",
+            "invalid request",
         ]
         return any(pattern in error_str for pattern in error_patterns)
 
-    async def _timed_invoke(self, chain, inputs: dict, operation_name: str = "LLM call", model: Optional[str] = None, prompt: Optional[ChatPromptTemplate] = None):
+    async def _timed_invoke(
+        self,
+        chain,
+        inputs: dict,
+        operation_name: str = "LLM call",
+        model: Optional[str] = None,
+        prompt: Optional[ChatPromptTemplate] = None,
+    ):
         """Execute an LLM call with timing measurement and retry on 40x errors.
 
         Args:
@@ -172,36 +202,46 @@ class LLMAnalyzer:
             The response from the chain.
         """
         fallback_model = self._get_fallback_model()
-        
+
         if self.verbose:
-            print(f"    ⏱️  LLM call starting: {operation_name} (model: {model or self._model_name})")
+            print(
+                f"    ⏱️  LLM call starting: {operation_name} (model: {model or self._model_name})"
+            )
             start_time = time.perf_counter()
 
         try:
             response = await chain.ainvoke(inputs)
-            
+
             if self.verbose:
                 elapsed = time.perf_counter() - start_time
                 print(f"    ⏱️  LLM call completed: {operation_name} ({elapsed:.2f}s)")
-            
+
             return response
-            
+
         except Exception as primary_error:
             # Check if it's a 40x error and we have a fallback model
             if fallback_model and self._is_40x_error(primary_error):
                 if self.verbose:
-                    print(f"    ⚠️  40x error on primary model, retrying with fallback: {fallback_model}")
-                
+                    print(
+                        f"    ⚠️  40x error on primary model, retrying with fallback: {fallback_model}"
+                    )
+
                 # Get fallback LLM instance with fallback base URL and API key
                 fallback_base_url = self._get_fallback_base_url()
                 fallback_api_key = self._get_fallback_api_key()
-                fallback_llm = self._get_llm(model=fallback_model, base_url=fallback_base_url, api_key=fallback_api_key)
-                
+                fallback_llm = self._get_llm(
+                    model=fallback_model,
+                    base_url=fallback_base_url,
+                    api_key=fallback_api_key,
+                )
+
                 try:
                     if self.verbose:
-                        print(f"    ⏱️  LLM fallback call starting: {operation_name} (model: {fallback_model})")
+                        print(
+                            f"    ⏱️  LLM fallback call starting: {operation_name} (model: {fallback_model})"
+                        )
                         start_time = time.perf_counter()
-                    
+
                     # Reconstruct chain with fallback LLM if prompt is available
                     if prompt is not None:
                         fallback_chain = prompt | fallback_llm | self.output_parser
@@ -209,14 +249,18 @@ class LLMAnalyzer:
                     else:
                         # Fallback: try to invoke the LLM directly with the inputs
                         # This may not work for all cases but is a best-effort attempt
-                        fallback_response = await (fallback_llm | self.output_parser).ainvoke(inputs)
-                    
+                        fallback_response = await (
+                            fallback_llm | self.output_parser
+                        ).ainvoke(inputs)
+
                     if self.verbose:
                         elapsed = time.perf_counter() - start_time
-                        print(f"    ⏱️  LLM fallback call completed: {operation_name} ({elapsed:.2f}s)")
-                    
+                        print(
+                            f"    ⏱️  LLM fallback call completed: {operation_name} ({elapsed:.2f}s)"
+                        )
+
                     return fallback_response
-                    
+
                 except Exception as fallback_error:
                     if self.verbose:
                         print(f"    ❌ Both primary and fallback models failed")
@@ -238,9 +282,9 @@ class LLMAnalyzer:
         formatted = []
         for i, article in enumerate(articles[:20], 1):
             # Use full content if available, otherwise fall back to summary
-            content = article.get('content', '') or article.get('summary', '')
+            content = article.get("content", "") or article.get("summary", "")
             # Truncate to reasonable length for prompts (500 chars for better context)
-            content_preview = content[:500] if content else 'N/A'
+            content_preview = content[:500] if content else "N/A"
 
             formatted.append(
                 f"{i}. {article.get('title', 'N/A')}\n"
@@ -292,7 +336,7 @@ class LLMAnalyzer:
         self,
         articles: list[dict],
         technologies: list[dict],
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> str:
         """Generate an intelligent executive summary using LLM.
 
@@ -303,29 +347,43 @@ class LLMAnalyzer:
         Returns:
             Generated executive summary string.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology news analyst. Generate a concise executive summary 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a technology news analyst. Generate a concise executive summary 
             of the technology news landscape based on the provided articles and technologies.
             Focus on:
             1. Key trends and patterns
             2. Significant developments
             3. Market implications
-            Keep the summary to 2-3 paragraphs."""),
-            ("user", """Articles:
+            Keep the summary to 2-3 paragraphs.""",
+                ),
+                (
+                    "user",
+                    """Articles:
 {articles}
 
 Technologies:
 {technologies}
 
-Generate an executive summary:""")
-        ])
+Generate an executive summary:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="executive_summary")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "articles": self._format_articles_for_prompt(articles),
-            "technologies": self._format_technologies_for_prompt(technologies)
-        }, "generate_executive_summary", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {
+                "articles": self._format_articles_for_prompt(articles),
+                "technologies": self._format_technologies_for_prompt(technologies),
+            },
+            "generate_executive_summary",
+            model=model,
+            prompt=prompt,
+        )
 
         return response
 
@@ -333,7 +391,7 @@ Generate an executive summary:""")
         self,
         article: dict,
         related_technologies: list[dict],
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> dict:
         """Analyze the significance of a news article using LLM.
 
@@ -344,8 +402,11 @@ Generate an executive summary:""")
         Returns:
             Dictionary with significance analysis.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology news analyst. Analyze the significance 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a technology news analyst. Analyze the significance 
             of the given news article. Consider:
             1. Market impact potential (score 0-1)
             2. Technology advancement implications
@@ -357,32 +418,43 @@ Generate an executive summary:""")
             - market_impact (string description)
             - technology_implications (string description)
             - competitive_effects (string description)
-            - geographic_relevance (string description)"""),
-            ("user", """Article Title: {title}
+            - geographic_relevance (string description)""",
+                ),
+                (
+                    "user",
+                    """Article Title: {title}
 Article Content: {content}
 Related Technologies: {technologies}
 
-Analyze the significance and return JSON:""")
-        ])
+Analyze the significance and return JSON:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="significance")
         chain = prompt | llm | self.output_parser
         # Use full content if available, otherwise fall back to summary
         content = article.get("content", "") or article.get("summary", "")
-        response = await self._timed_invoke(chain, {
-            "title": article.get("title", ""),
-            "content": content[:2000],  # Use more content for better analysis
-            "technologies": ", ".join([t.get("name", "") for t in related_technologies])
-        }, "analyze_significance", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {
+                "title": article.get("title", ""),
+                "content": content[:2000],  # Use more content for better analysis
+                "technologies": ", ".join(
+                    [t.get("name", "") for t in related_technologies]
+                ),
+            },
+            "analyze_significance",
+            model=model,
+            prompt=prompt,
+        )
 
         result = self._parse_json_response(response)
         result["article_title"] = article.get("title", "")
         return result
 
     async def extract_entities_with_context(
-        self,
-        text: str,
-        model: Optional[str] = None
+        self, text: str, model: Optional[str] = None
     ) -> dict:
         """Extract companies and countries with context using LLM.
 
@@ -392,26 +464,40 @@ Analyze the significance and return JSON:""")
         Returns:
             Dictionary with companies and countries lists.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """Extract companies and countries mentioned in the text.
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """Extract companies and countries mentioned in the text.
             For each entity, provide the context in which it was mentioned.
             
             Return a JSON object with these keys:
             - companies: list of objects with {{name, context, sentiment (positive/negative/neutral)}}
-            - countries: list of objects with {{name, context}}"""),
-            ("user", """Text: {text}
+            - countries: list of objects with {{name, context}}""",
+                ),
+                (
+                    "user",
+                    """Text: {text}
 
-Extract entities and return JSON:""")
-        ])
+Extract entities and return JSON:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="extract_entities_with_context")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {"text": text[:2000]}, "extract_entities_with_context", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {"text": text[:2000]},
+            "extract_entities_with_context",
+            model=model,
+            prompt=prompt,
+        )
 
         result = self._parse_json_response(response)
         return {
             "companies": result.get("companies", []),
-            "countries": result.get("countries", [])
+            "countries": result.get("countries", []),
         }
 
     async def extract_all_entities(
@@ -419,7 +505,7 @@ Extract entities and return JSON:""")
         title: str,
         content: str = "",
         summary: str = "",
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> dict:
         """Extract all entities (technologies, companies, countries) from article in a single LLM call.
 
@@ -446,8 +532,11 @@ Extract entities and return JSON:""")
         elif summary:
             full_text += summary[:1000]
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology news analyzer. Extract ALL entities from the given article 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a technology news analyzer. Extract ALL entities from the given article 
             in a single comprehensive analysis.
 
             Extract the following:
@@ -494,21 +583,32 @@ Extract entities and return JSON:""")
                 "countries": [
                     {{"name": string, "context": string}}
                 ]
-            }}"""),
-            ("user", """Article Title: {title}
+            }}""",
+                ),
+                (
+                    "user",
+                    """Article Title: {title}
 
 Article Content:
 {content}
 
-Extract all entities and return JSON:""")
-        ])
+Extract all entities and return JSON:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="extract_all_entities")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "title": title,
-            "content": full_text[:2500]  # Limit total text length
-        }, "extract_all_entities", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {
+                "title": title,
+                "content": full_text[:2500],  # Limit total text length
+            },
+            "extract_all_entities",
+            model=model,
+            prompt=prompt,
+        )
 
         result = self._parse_json_response(response)
 
@@ -534,47 +634,52 @@ Extract all entities and return JSON:""")
         validated_technologies = []
         for tech in technologies:
             if isinstance(tech, dict) and tech.get("name"):
-                validated_technologies.append({
-                    "name": tech["name"],
-                    "category": tech.get("category", "General Technology"),
-                    "relevance": max(0.0, min(1.0, float(tech.get("relevance", 0.5)))),
-                    "context": tech.get("context", "")
-                })
+                validated_technologies.append(
+                    {
+                        "name": tech["name"],
+                        "category": tech.get("category", "General Technology"),
+                        "relevance": max(
+                            0.0, min(1.0, float(tech.get("relevance", 0.5)))
+                        ),
+                        "context": tech.get("context", ""),
+                    }
+                )
 
         # Validate and normalize company entries
         validated_companies = []
         for company in companies:
             if isinstance(company, dict) and company.get("name"):
-                validated_companies.append({
-                    "name": company["name"],
-                    "country": company.get("country"),
-                    "industry": company.get("industry"),
-                    "context": company.get("context", ""),
-                    "sentiment": company.get("sentiment", "neutral")
-                })
+                validated_companies.append(
+                    {
+                        "name": company["name"],
+                        "country": company.get("country"),
+                        "industry": company.get("industry"),
+                        "context": company.get("context", ""),
+                        "sentiment": company.get("sentiment", "neutral"),
+                    }
+                )
 
         # Validate and normalize country entries
         validated_countries = []
         for country in countries:
             if isinstance(country, dict) and country.get("name"):
-                validated_countries.append({
-                    "name": country["name"],
-                    "context": country.get("context", "")
-                })
+                validated_countries.append(
+                    {"name": country["name"], "context": country.get("context", "")}
+                )
 
         return {
             "is_technology_related": bool(is_tech),
             "confidence": confidence,
             "technologies": validated_technologies,
             "companies": validated_companies,
-            "countries": validated_countries
+            "countries": validated_countries,
         }
 
     async def generate_trend_analysis(
         self,
         technologies: list[dict],
         articles: list[dict],
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> str:
         """Generate trend analysis using LLM.
 
@@ -585,37 +690,49 @@ Extract all entities and return JSON:""")
         Returns:
             Generated trend analysis string.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology trend analyst. Analyze the provided 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a technology trend analyst. Analyze the provided 
             technologies and news articles to identify:
             1. Emerging trends (what's gaining momentum)
             2. Declining technologies (what's losing attention)
             3. Cross-technology synergies (how technologies connect)
             4. Market opportunities (potential growth areas)
             
-            Provide a structured analysis with clear sections."""),
-            ("user", """Technologies:
+            Provide a structured analysis with clear sections.""",
+                ),
+                (
+                    "user",
+                    """Technologies:
 {technologies}
 
 Recent Articles:
 {articles}
 
-Generate a comprehensive trend analysis:""")
-        ])
+Generate a comprehensive trend analysis:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="trend_analysis")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "technologies": self._format_technologies_for_prompt(technologies),
-            "articles": self._format_articles_for_prompt(articles[:15])
-        }, "generate_trend_analysis", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {
+                "technologies": self._format_technologies_for_prompt(technologies),
+                "articles": self._format_articles_for_prompt(articles[:15]),
+            },
+            "generate_trend_analysis",
+            model=model,
+            prompt=prompt,
+        )
 
         return response
 
     async def generate_market_impact_summary(
-        self,
-        significance_analyses: list[dict],
-        model: Optional[str] = None
+        self, significance_analyses: list[dict], model: Optional[str] = None
     ) -> str:
         """Generate a summary of market impact from significance analyses.
 
@@ -636,29 +753,38 @@ Generate a comprehensive trend analysis:""")
                 f"{analysis.get('market_impact', 'N/A')}"
             )
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a market analyst. Synthesize the following market impact 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a market analyst. Synthesize the following market impact 
             analyses into a cohesive summary. Identify common themes, overall market direction, 
-            and key takeaways. Keep it to 1-2 paragraphs."""),
-            ("user", """Market Impact Analyses:
+            and key takeaways. Keep it to 1-2 paragraphs.""",
+                ),
+                (
+                    "user",
+                    """Market Impact Analyses:
 {analyses}
 
-Generate a market impact summary:""")
-        ])
+Generate a market impact summary:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="market_impact_summary")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "analyses": "\n".join(analyses_text)
-        }, "generate_market_impact_summary", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {"analyses": "\n".join(analyses_text)},
+            "generate_market_impact_summary",
+            model=model,
+            prompt=prompt,
+        )
 
         return response
 
     async def generate_geographic_insights(
-        self,
-        countries: list[dict],
-        articles: list[dict],
-        model: Optional[str] = None
+        self, countries: list[dict], articles: list[dict], model: Optional[str] = None
     ) -> str:
         """Generate geographic insights using LLM.
 
@@ -677,32 +803,41 @@ Generate a market impact summary:""")
             for c in countries[:10]
         ]
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a geopolitical analyst. Analyze the geographic distribution 
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a geopolitical analyst. Analyze the geographic distribution 
             of technology news coverage. Consider:
             1. Regional technology hubs and their focus areas
             2. Emerging markets
             3. Geographic shifts in technology development
-            Keep the analysis to 1-2 paragraphs."""),
-            ("user", """Countries Mentioned:
+            Keep the analysis to 1-2 paragraphs.""",
+                ),
+                (
+                    "user",
+                    """Countries Mentioned:
 {countries}
 
-Generate geographic insights:""")
-        ])
+Generate geographic insights:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="geographic_insights")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "countries": "\n".join(countries_text)
-        }, "generate_geographic_insights", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {"countries": "\n".join(countries_text)},
+            "generate_geographic_insights",
+            model=model,
+            prompt=prompt,
+        )
 
         return response
 
     async def analyze_article_relevance(
-        self,
-        title: str,
-        summary: str = "",
-        model: Optional[str] = None
+        self, title: str, summary: str = "", model: Optional[str] = None
     ) -> tuple[bool, list[str], float]:
         """Analyze if an article is technology-related and calculate relevance in a single LLM call.
 
@@ -716,8 +851,11 @@ Generate geographic insights:""")
         Returns:
             Tuple of (is_tech_related: bool, tech_topics: list[str], relevance_score: float)
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technology news classifier and relevance assessor. Analyze the given
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a technology news classifier and relevance assessor. Analyze the given
             article title and summary to:
             1. Determine if it is related to technology topics
             2. Identify the technology topics mentioned
@@ -752,19 +890,27 @@ Generate geographic insights:""")
             - is_technology_related (boolean): true if the article is about technology
             - tech_topics (list of strings): technology topics mentioned in the article
             - relevance_score (float 0-1): overall relevance to technology
-            - confidence (float 0-1): confidence level of the classification"""),
-            ("user", """Article Title: {title}
+            - confidence (float 0-1): confidence level of the classification""",
+                ),
+                (
+                    "user",
+                    """Article Title: {title}
 Article Summary: {summary}
 
-Analyze and return JSON:""")
-        ])
+Analyze and return JSON:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="article_relevance")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "title": title,
-            "summary": summary[:500] if summary else "N/A"
-        }, "analyze_article_relevance", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {"title": title, "summary": summary[:500] if summary else "N/A"},
+            "analyze_article_relevance",
+            model=model,
+            prompt=prompt,
+        )
 
         result = self._parse_json_response(response)
         is_tech = result.get("is_technology_related", False)
@@ -791,7 +937,7 @@ Analyze and return JSON:""")
         technologies: list[dict],
         top_companies: list[dict],
         top_countries: list[dict],
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> dict:
         """Generate all report sections in a single LLM call.
 
@@ -813,43 +959,50 @@ Analyze and return JSON:""")
         """
         # Format articles for prompt (limit to top 20 for context window)
         articles_text = self._format_articles_for_prompt(articles[:20])
-        
+
         # Format technologies
         technologies_text = self._format_technologies_for_prompt(technologies[:15])
-        
+
         # Format companies
         companies_text = ""
         if top_companies:
-            companies_text = "\n".join([
-                f"- {c.get('name', 'Unknown')} ({c.get('country', 'N/A')}): {c.get('mention_count', 0)} mentions"
-                for c in top_companies[:10]
-            ])
-        
+            companies_text = "\n".join(
+                [
+                    f"- {c.get('name', 'Unknown')} ({c.get('country', 'N/A')}): {c.get('mention_count', 0)} mentions"
+                    for c in top_companies[:10]
+                ]
+            )
+
         # Format countries
         countries_text = ""
         if top_countries:
-            countries_text = "\n".join([
-                f"- {c.get('name', 'Unknown')}: {c.get('mention_count', 0)} mentions"
-                for c in top_countries[:10]
-            ])
-        
+            countries_text = "\n".join(
+                [
+                    f"- {c.get('name', 'Unknown')}: {c.get('mention_count', 0)} mentions"
+                    for c in top_countries[:10]
+                ]
+            )
+
         # Get top 5 high-relevance articles for significance analysis
         high_relevance_articles = sorted(
-            articles,
-            key=lambda x: x.get("relevance_score", 0),
-            reverse=True
+            articles, key=lambda x: x.get("relevance_score", 0), reverse=True
         )[:5]
-        
-        high_relevance_text = "\n".join([
-            f"{i+1}. {a.get('title', 'N/A')}\n"
-            f"   Relevance: {a.get('relevance_score', 0):.2f}, "
-            f"Sentiment: {a.get('sentiment_score', 0):.2f}\n"
-            f"   Content: {(a.get('content', '') or a.get('summary', ''))[:300]}{'...' if len(a.get('content', '') or a.get('summary', '')) > 300 else ''}"
-            for i, a in enumerate(high_relevance_articles)
-        ])
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a comprehensive technology news analyst. Generate a complete report analysis 
+        high_relevance_text = "\n".join(
+            [
+                f"{i + 1}. {a.get('title', 'N/A')}\n"
+                f"   Relevance: {a.get('relevance_score', 0):.2f}, "
+                f"Sentiment: {a.get('sentiment_score', 0):.2f}\n"
+                f"   Content: {(a.get('content', '') or a.get('summary', ''))[:300]}{'...' if len(a.get('content', '') or a.get('summary', '')) > 300 else ''}"
+                for i, a in enumerate(high_relevance_articles)
+            ]
+        )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a comprehensive technology news analyst. Generate a complete report analysis 
             in a single response. You must provide ALL of the following sections in a structured JSON format:
 
             1. EXECUTIVE SUMMARY (2-3 paragraphs):
@@ -891,8 +1044,11 @@ Analyze and return JSON:""")
                    ],
                    "market_impact_summary": "string (1-2 paragraphs)"
                }}
-           }}"""),
-            ("user", """Articles (most recent):
+           }}""",
+                ),
+                (
+                    "user",
+                    """Articles (most recent):
 {articles}
 
 Technologies Tracked:
@@ -907,29 +1063,36 @@ Top Countries:
 High-Relevance Articles for Significance Analysis:
 {high_relevance_articles}
 
-Generate the complete report analysis as JSON:""")
-        ])
+Generate the complete report analysis as JSON:""",
+                ),
+            ]
+        )
 
         llm = self._get_llm(model, function_name="complete_report")
         chain = prompt | llm | self.output_parser
-        response = await self._timed_invoke(chain, {
-            "articles": articles_text,
-            "technologies": technologies_text,
-            "companies": companies_text or "No company data available",
-            "countries": countries_text or "No country data available",
-            "high_relevance_articles": high_relevance_text
-        }, "generate_complete_report", model=model, prompt=prompt)
+        response = await self._timed_invoke(
+            chain,
+            {
+                "articles": articles_text,
+                "technologies": technologies_text,
+                "companies": companies_text or "No company data available",
+                "countries": countries_text or "No country data available",
+                "high_relevance_articles": high_relevance_text,
+            },
+            "generate_complete_report",
+            model=model,
+            prompt=prompt,
+        )
 
         result = self._parse_json_response(response)
-        
+
         # Validate and provide defaults for missing sections
         return {
             "executive_summary": result.get("executive_summary", ""),
             "trend_analysis": result.get("trend_analysis", ""),
             "geographic_insights": result.get("geographic_insights", ""),
-            "significance_analysis": result.get("significance_analysis", {
-                "top_articles": [],
-                "market_impact_summary": ""
-            })
+            "significance_analysis": result.get(
+                "significance_analysis",
+                {"top_articles": [], "market_impact_summary": ""},
+            ),
         }
-

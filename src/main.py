@@ -72,14 +72,11 @@ class TechNewsMultiAgentSystem:
         self.orchestrator.register_agent(self.report_generator)
 
     def _check_llm_connectivity(self):
-        provider = LLMConfig.get_provider()
         base_url = LLMConfig.get_base_url()
         model = LLMConfig.get_model("news_collector")
 
-        if provider == "none" or not base_url:
-            console.print(
-                "[dim]ℹ[/dim] LLM disabled (set LLM_PROVIDER and LLM_BASE_URL to enable)"
-            )
+        if not base_url:
+            console.print("[dim]ℹ[/dim] LLM disabled (set LLM_BASE_URL to enable)")
             return
 
         from .utils.llm_analyzer import LLMAnalyzer
@@ -111,7 +108,7 @@ class TechNewsMultiAgentSystem:
             else:
                 response = result[0]
                 console.print(
-                    f'[green]✓[/green] LLM connected: {provider} / {model} — "{response[:80]}{"..." if len(response) > 80 else ""}"'
+                    f'[green]✓[/green] LLM connected: model={model} — "{response[:80]}{"..." if len(response) > 80 else ""}"'
                 )
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] LLM connection failed: {str(e)[:100]}")

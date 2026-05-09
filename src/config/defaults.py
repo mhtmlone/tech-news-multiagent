@@ -173,20 +173,11 @@ DEFAULT_TECH_KEYWORDS = [
 # LLM DEFAULTS
 # =============================================================================
 
-# Default models for each LLM provider
-DEFAULT_LLM_MODELS = {
-    "openrouter": "qwen/qwen3.5-27b",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-3-haiku-20240307",
-    "ollama": "qwen3.5:397b-cloud",
-}
+# Default LLM model
+DEFAULT_LLM_MODEL = "qwen/qwen3.5-27b"
 
-DEFAULT_FALLBACK_MODELS = {
-    "openrouter": "anthropic/claude-3-haiku",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-3-haiku-20240307",
-    "ollama": "qwen3.5:397b-cloud",
-}
+# Default fallback model
+DEFAULT_FALLBACK_MODEL = "anthropic/claude-3-haiku"
 
 # Default LLM temperature
 DEFAULT_LLM_TEMPERATURE = 0.7

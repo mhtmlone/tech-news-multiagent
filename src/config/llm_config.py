@@ -4,9 +4,9 @@ This module provides centralized configuration management for LLM usage
 across all agents and utilities in the system.
 
 Environment Variables:
-    LLM_PROVIDER: The LLM provider to use (openrouter, openai, anthropic, ollama, none)
-    LLM_API_KEY: API key for the LLM provider
-    LLM_BASE_URL: Base URL for API calls (auto-configured for openrouter and ollama)
+    LLM_BASE_URL: Base URL for API calls (required for LLM features)
+    LLM_API_KEY: API key for the LLM provider (optional for local providers)
+    LLM_MODEL: Default model to use (falls back to LLM_MODEL or built-in default)
     LLM_TEMPERATURE: Temperature for LLM responses (default: 0.7)
 
     Component-specific model configuration:
@@ -25,8 +25,8 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from .defaults import (
-    DEFAULT_LLM_MODELS,
-    DEFAULT_FALLBACK_MODELS,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_FALLBACK_MODEL,
     DEFAULT_LLM_TEMPERATURE,
     LLM_COMPONENT_MODEL_VARS,
     LLM_FUNCTION_MODEL_VARS,
@@ -41,50 +41,34 @@ class LLMConfig:
 
     This class provides a unified way to configure LLM settings across
     the entire application. Each component can use a specific model
-    while sharing common settings like API key and provider.
+    while sharing common settings like base URL and API key.
+
+    LLM features are enabled when LLM_BASE_URL is set (pointing to
+    an OpenAI-compatible endpoint) or when an API key is available.
 
     Example:
         >>> config = LLMConfig()
-        >>> # Get settings for news collector
         >>> model = config.get_model("news_collector")
         >>> api_key = config.get_api_key()
         >>> base_url = config.get_base_url()
     """
 
-    # Reference defaults from centralized defaults module
-    DEFAULT_MODELS = DEFAULT_LLM_MODELS
+    DEFAULT_MODEL = DEFAULT_LLM_MODEL
     COMPONENT_MODEL_VARS = LLM_COMPONENT_MODEL_VARS
     FUNCTION_MODEL_VARS = LLM_FUNCTION_MODEL_VARS
-    FALLBACK_MODELS = DEFAULT_FALLBACK_MODELS
-
-    @classmethod
-    def get_provider(cls) -> str:
-        """Get LLM provider.
-
-        Supported providers:
-        - "openrouter": OpenRouter API (OpenAI-compatible)
-        - "openai": OpenAI API
-        - "anthropic": Anthropic API (via LangChain)
-        - "ollama": Ollama API (OpenAI-compatible)
-        - "none": Disable LLM features
-
-        Returns:
-            LLM provider name (lowercase).
-        """
-        return os.getenv("LLM_PROVIDER", "none").lower()
+    FALLBACK_MODEL = DEFAULT_FALLBACK_MODEL
 
     @classmethod
     def is_enabled(cls) -> bool:
         """Check if LLM features are enabled.
 
+        LLM is enabled when either a base URL or an API key is configured.
+
         Returns:
             True if LLM is enabled and configured, False otherwise.
         """
-        provider = cls.get_provider()
-        if provider == "none" or not provider:
-            return False
-
-        # Check if API key is available
+        if cls.get_base_url():
+            return True
         api_key = cls.get_api_key()
         return api_key is not None and len(api_key) > 0
 
@@ -94,23 +78,23 @@ class LLMConfig:
 
         Priority:
         1. LLM_API_KEY env var
-        2. OPENAI_API_KEY env var (for OpenAI/OpenRouter)
-        3. ANTHROPIC_API_KEY env var (for Anthropic)
+        2. OPENAI_API_KEY env var
+        3. ANTHROPIC_API_KEY env var
 
         Returns:
             API key string or None if not configured.
         """
-        # Check for generic LLM API key first
         api_key = os.getenv("LLM_API_KEY", "")
         if api_key:
             return api_key
 
-        # Fall back to provider-specific keys
-        provider = cls.get_provider()
-        if provider in ("openrouter", "openai"):
-            return os.getenv("OPENAI_API_KEY")
-        elif provider == "anthropic":
-            return os.getenv("ANTHROPIC_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if api_key:
+            return api_key
+
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if api_key:
+            return api_key
 
         return None
 
@@ -118,24 +102,12 @@ class LLMConfig:
     def get_base_url(cls) -> Optional[str]:
         """Get LLM base URL for API calls.
 
-        This is useful for:
-        - OpenRouter: "https://openrouter.ai/api/v1"
-        - Custom endpoints
-
         Returns:
-            Base URL string or None for default.
+            Base URL string or None if not configured.
         """
         base_url = os.getenv("LLM_BASE_URL", "")
         if base_url:
             return base_url
-
-        # Auto-configure for OpenRouter and Ollama
-        provider = cls.get_provider()
-        if provider == "openrouter":
-            return "https://openrouter.ai/api/v1"
-        elif provider == "ollama":
-            return "https://ollama.com/v1"
-
         return None
 
     @classmethod
@@ -151,21 +123,11 @@ class LLMConfig:
             return DEFAULT_LLM_TEMPERATURE
 
     @classmethod
-    def get_default_model(cls) -> str:
-        """Get the default model for the current provider.
-
-        Returns:
-            Default model name for the configured provider.
-        """
-        provider = cls.get_provider()
-        return cls.DEFAULT_MODELS.get(provider, "gpt-4o-mini")
-
-    @classmethod
     def get_model(cls, component: str) -> str:
         """Get the model for a specific component.
 
         Each component can have its own model configured via environment
-        variables. If not set, falls back to the provider's default model.
+        variables. If not set, falls back to LLM_MODEL, then the default.
 
         Args:
             component: Component name (e.g., "news_collector", "report_generator").
@@ -180,8 +142,12 @@ class LLMConfig:
             if model:
                 return model
 
-        # Fall back to default model for provider
-        return cls.get_default_model()
+        # Fall back to generic LLM_MODEL env var
+        model = os.getenv("LLM_MODEL", "")
+        if model:
+            return model
+
+        return cls.DEFAULT_MODEL
 
     @classmethod
     def get_function_model(cls, function_name: str) -> Optional[str]:
@@ -207,63 +173,44 @@ class LLMConfig:
     def get_fallback_model(cls) -> str:
         """Get the fallback model for 40x error retries.
 
-        Fallback model is used when the primary model returns a 40x error.
-        If not configured via environment variable, uses provider-specific defaults.
-
         Returns:
             Fallback model name.
         """
-        # Check for global fallback model
         model = os.getenv("LLM_FALLBACK_MODEL", "")
         if model:
             return model
 
-        # Fall back to provider-specific default fallback
-        provider = cls.get_provider()
-        return cls.FALLBACK_MODELS.get(provider, "gpt-4o-mini")
+        return cls.FALLBACK_MODEL
 
     @classmethod
     def get_fallback_base_url(cls) -> Optional[str]:
         """Get the fallback base URL for 40x error retries.
 
-        Fallback base URL is used when the primary model returns a 40x error.
-        If not configured via environment variable, uses the primary base URL.
-
         Returns:
             Fallback base URL or None to use the primary base URL.
         """
-        # Check for global fallback base URL
         fallback_url = os.getenv("LLM_FALLBACK_BASE_URL", "")
         if fallback_url:
             return fallback_url
 
-        # Fall back to the primary base URL (None means use default)
         return None
 
     @classmethod
     def get_fallback_api_key(cls) -> Optional[str]:
         """Get the fallback API key for 40x error retries.
 
-        Fallback API key is used when the primary model returns a 40x error.
-        If not configured via environment variable, uses the primary API key.
-
         Returns:
             Fallback API key or None to use the primary API key.
         """
-        # Check for global fallback API key
         fallback_key = os.getenv("LLM_FALLBACK_API_KEY", "")
         if fallback_key:
             return fallback_key
 
-        # Fall back to the primary API key
         return cls.get_api_key()
 
     @classmethod
     def create_llm_kwargs(cls, component: str) -> dict:
         """Create kwargs for LLMAnalyzer initialization.
-
-        This is a convenience method that creates a dictionary with all
-        the necessary parameters for initializing an LLMAnalyzer instance.
 
         Args:
             component: Component name for model selection.
@@ -271,8 +218,12 @@ class LLMConfig:
         Returns:
             Dictionary with api_key, model, base_url, and temperature.
         """
+        api_key = cls.get_api_key()
+        if api_key is None:
+            api_key = "not-required"
+
         return {
-            "api_key": cls.get_api_key(),
+            "api_key": api_key,
             "model": cls.get_model(component),
             "base_url": cls.get_base_url(),
             "temperature": cls.get_temperature(),

@@ -58,13 +58,12 @@ class NewsCollectorAgent(BaseAgent):
             self.llm_analyzer = LLMAnalyzer(**llm_kwargs)
             logger.info(
                 f"LLM-based technology classification enabled: "
-                f"provider={LLMConfig.get_provider()}, "
                 f"model={LLMConfig.get_model('news_collector')}"
             )
         else:
             logger.info(
                 "LLM-based technology classification disabled: "
-                "LLM provider not configured or API key not set. "
+                "LLM_BASE_URL not configured or API key not set. "
                 "Falling back to keyword-based matching."
             )
 
@@ -79,8 +78,7 @@ class NewsCollectorAgent(BaseAgent):
 
         # Log configuration on startup
         llm_status = (
-            f"enabled (provider={LLMConfig.get_provider()}, "
-            f"model={LLMConfig.get_model('news_collector')})"
+            f"enabled (model={LLMConfig.get_model('news_collector')})"
             if self.llm_analyzer
             else "disabled (using keyword-based fallback)"
         )
