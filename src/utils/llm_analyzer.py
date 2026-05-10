@@ -1,6 +1,7 @@
 """LLM-powered analysis utilities using LangChain."""
 
 import json
+import logging
 import os
 import time
 from typing import Optional
@@ -10,6 +11,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from src.config.llm_config import LLMConfig
+
+logger = logging.getLogger(__name__)
 
 
 class LLMAnalyzer:
@@ -58,8 +61,8 @@ class LLMAnalyzer:
         # Lazy-loaded fallback model
         self._fallback_model: Optional[str] = None
         if verbose:
-            print(
-                f"    ⏱️  LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})"
+            logger.info(
+                f"LLMAnalyzer initialized with verbose timing enabled (model: {effective_model})"
             )
 
     def _get_llm(
@@ -102,8 +105,8 @@ class LLMAnalyzer:
                     llm_kwargs["base_url"] = effective_base_url
                 self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
                 if self.verbose:
-                    print(
-                        f"    ⏱️  Created new LLM instance for model: {model} (base_url: {effective_base_url or 'default'})"
+                    logger.debug(
+                        f"Created new LLM instance for model: {model} (base_url: {effective_base_url or 'default'})"
                     )
             return self._llm_cache[cache_key]
 
@@ -122,8 +125,8 @@ class LLMAnalyzer:
                         llm_kwargs["base_url"] = effective_base_url
                     self._llm_cache[cache_key] = ChatOpenAI(**llm_kwargs)
                     if self.verbose:
-                        print(
-                            f"    ⏱️  Created new LLM instance for function-specific model: {function_name} -> {env_model}"
+                        logger.debug(
+                            f"Created new LLM instance for function-specific model: {function_name} -> {env_model}"
                         )
                 return self._llm_cache[cache_key]
 
@@ -204,8 +207,8 @@ class LLMAnalyzer:
         fallback_model = self._get_fallback_model()
 
         if self.verbose:
-            print(
-                f"    ⏱️  LLM call starting: {operation_name} (model: {model or self._model_name})"
+            logger.info(
+                f"LLM call starting: {operation_name} (model: {model or self._model_name})"
             )
             start_time = time.perf_counter()
 
@@ -214,19 +217,17 @@ class LLMAnalyzer:
 
             if self.verbose:
                 elapsed = time.perf_counter() - start_time
-                print(f"    ⏱️  LLM call completed: {operation_name} ({elapsed:.2f}s)")
+                logger.info(f"LLM call completed: {operation_name} ({elapsed:.2f}s)")
 
             return response
 
         except Exception as primary_error:
-            # Check if it's a 40x error and we have a fallback model
             if fallback_model and self._is_40x_error(primary_error):
                 if self.verbose:
-                    print(
-                        f"    ⚠️  40x error on primary model, retrying with fallback: {fallback_model}"
+                    logger.warning(
+                        f"40x error on primary model, retrying with fallback: {fallback_model}"
                     )
 
-                # Get fallback LLM instance with fallback base URL and API key
                 fallback_base_url = self._get_fallback_base_url()
                 fallback_api_key = self._get_fallback_api_key()
                 fallback_llm = self._get_llm(
@@ -237,33 +238,30 @@ class LLMAnalyzer:
 
                 try:
                     if self.verbose:
-                        print(
-                            f"    ⏱️  LLM fallback call starting: {operation_name} (model: {fallback_model})"
+                        logger.info(
+                            f"LLM fallback call starting: {operation_name} (model: {fallback_model})"
                         )
                         start_time = time.perf_counter()
 
-                    # Reconstruct chain with fallback LLM if prompt is available
                     if prompt is not None:
                         fallback_chain = prompt | fallback_llm | self.output_parser
                         fallback_response = await fallback_chain.ainvoke(inputs)
                     else:
-                        # Fallback: try to invoke the LLM directly with the inputs
-                        # This may not work for all cases but is a best-effort attempt
                         fallback_response = await (
                             fallback_llm | self.output_parser
                         ).ainvoke(inputs)
 
                     if self.verbose:
                         elapsed = time.perf_counter() - start_time
-                        print(
-                            f"    ⏱️  LLM fallback call completed: {operation_name} ({elapsed:.2f}s)"
+                        logger.info(
+                            f"LLM fallback call completed: {operation_name} ({elapsed:.2f}s)"
                         )
 
                     return fallback_response
 
                 except Exception as fallback_error:
                     if self.verbose:
-                        print(f"    ❌ Both primary and fallback models failed")
+                        logger.error("Both primary and fallback models failed")
                     # Raise the original error if fallback also fails
                     raise primary_error from fallback_error
             else:

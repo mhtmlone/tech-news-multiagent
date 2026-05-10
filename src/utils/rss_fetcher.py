@@ -60,11 +60,11 @@ async def fetch_feed(
     try:
         feed_progress = f"[{feed_index}/{total_feeds}]" if total_feeds > 0 else ""
         if verbose:
-            print(f"  {feed_progress} Fetching RSS feed: {url}")
+            logger.debug(f"{feed_progress} Fetching RSS feed: {url}")
 
         async with session.get(url) as response:
             if verbose:
-                print(f"    → HTTP {response.status} received")
+                logger.debug(f"HTTP {response.status} received for {url}")
             if response.status == 200:
                 feed_content = await response.text()
                 feed = feedparser.parse(feed_content)
@@ -212,7 +212,7 @@ async def fetch_all_feeds(
     total_feeds = len(sources)
 
     if verbose:
-        print(f"\n  📡 Fetching {total_feeds} RSS feeds concurrently...")
+        logger.info(f"Fetching {total_feeds} RSS feeds concurrently...")
 
     close_session = False
     if session is None:

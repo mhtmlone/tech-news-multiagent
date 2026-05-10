@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -11,8 +12,6 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.tree import Tree
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.columns import Columns
 from rich import box
 
 from .memory.vector_store import VectorMemory
@@ -64,11 +63,16 @@ class TechNewsMultiAgentSystem:
         sqlite_path: Optional[str] = None,
         report_dir: Optional[str] = None,
         use_llm: bool = True,
+        verbose: bool = False,
     ):
         self.memory_dir = memory_dir or "./memory_db"
         self.sqlite_path = sqlite_path or "./data/news_content.db"
         self.report_dir = report_dir or "./reports"
         self.use_llm = use_llm
+        self.verbose = verbose
+
+        if verbose:
+            self._setup_verbose_logging()
 
         # Initialize storage
         self.memory = VectorMemory(persist_directory=self.memory_dir)
@@ -100,6 +104,22 @@ class TechNewsMultiAgentSystem:
         self.orchestrator.register_agent(self.memory_manager)
         self.orchestrator.register_agent(self.dev_tracker)
         self.orchestrator.register_agent(self.report_generator)
+
+    def _setup_verbose_logging(self):
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("    ⏱️  %(message)s"))
+        for logger_name in [
+            "src.utils.llm_analyzer",
+            "src.utils.rss_fetcher",
+            "src.utils.content_extractor",
+            "src.utils.entity_extractor",
+        ]:
+            lg = logging.getLogger(logger_name)
+            lg.setLevel(logging.INFO)
+            if not any(isinstance(h, logging.StreamHandler) for h in lg.handlers):
+                lg.addHandler(handler)
+            lg.propagate = False
 
     def _check_llm_connectivity(self):
         base_url = LLMConfig.get_base_url()
@@ -688,7 +708,7 @@ class TechNewsMultiAgentSystem:
 
 
 async def main():
-    system = TechNewsMultiAgentSystem()
+    system = TechNewsMultiAgentSystem(verbose=True)
 
     console.print(
         Panel(

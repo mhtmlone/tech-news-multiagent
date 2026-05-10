@@ -307,35 +307,42 @@ class NewsCollectorAgent(BaseAgent):
         total: int,
         cutoff_date: datetime,
         semaphore: asyncio.Semaphore,
+        progress_callback=None,
     ) -> Optional[dict]:
         """Process a single entry: analyze, fetch content, store, and return result data.
 
-        Returns a dict with keys: mention, article_id, article_data
+        Returns a dict with keys: mention, article_id, log
         or None if the entry is skipped (too old).
+
+        Args:
+            progress_callback: Optional callable(idx, total, message) for live progress.
         """
         if entry["published"] and entry["published"] < cutoff_date:
+            if progress_callback:
+                progress_callback(idx, total, "skipped (too old)")
             return None
 
+        log_lines = []
+        title_preview = (
+            entry["title"][:60] + "..." if len(entry["title"]) > 60 else entry["title"]
+        )
+
         async with semaphore:
-            if self.verbose:
-                title_preview = (
-                    entry["title"][:60] + "..."
-                    if len(entry["title"]) > 60
-                    else entry["title"]
-                )
-                print(f"  [{idx}/{total}] Analyzing: {title_preview}")
+            if progress_callback:
+                progress_callback(idx, total, f"analyzing: {title_preview}")
 
             is_tech, tech_topics, relevance = await self.analyze_article_relevance(
                 entry["title"], entry["summary"]
             )
 
-            if self.verbose:
-                if is_tech:
-                    print(
-                        f"      → Tech article (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})"
-                    )
-                else:
-                    print("      → Non-tech article (stored for deduplication)")
+            if is_tech:
+                log_lines.append(
+                    f"  ✅ [{idx}/{total}] {title_preview} — tech (relevance: {relevance:.2f}, topics: {', '.join(tech_topics[:3])}{'...' if len(tech_topics) > 3 else ''})"
+                )
+            else:
+                log_lines.append(
+                    f"  ⬜ [{idx}/{total}] {title_preview} — non-tech (stored for deduplication)"
+                )
 
             article_content = await self.fetch_article_content(entry["link"])
 
@@ -383,6 +390,10 @@ class NewsCollectorAgent(BaseAgent):
                 )
 
                 if self.extract_entities and self.entity_extractor:
+                    if progress_callback:
+                        progress_callback(
+                            idx, total, f"extracting entities: {title_preview}"
+                        )
                     entities = await self.entity_extractor.extract_all_unified(
                         title=entry["title"],
                         content=full_text,
@@ -457,7 +468,11 @@ class NewsCollectorAgent(BaseAgent):
                             article_id, technology_ids, technology_data
                         )
 
-            return {"mention": mention, "article_id": article_id}
+            if progress_callback:
+                status = "tech" if is_tech else "non-tech"
+                progress_callback(idx, total, f"done: {status} ({relevance:.2f})")
+
+            return {"mention": mention, "article_id": article_id, "log": log_lines}
 
     async def process(
         self, input_data: Optional[dict] = None
@@ -500,21 +515,117 @@ class NewsCollectorAgent(BaseAgent):
 
         semaphore = asyncio.Semaphore(self.rss_config.get_max_concurrent_articles())
 
-        tasks = [
-            self._process_single_entry(entry, idx, len(entries), cutoff_date, semaphore)
-            for idx, entry in enumerate(entries, 1)
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if self.verbose and entries:
+            from rich.progress import (
+                Progress,
+                SpinnerColumn,
+                TextColumn,
+                BarColumn,
+                MofNCompleteColumn,
+                TimeElapsedColumn,
+            )
+            from rich.console import Console
 
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Error processing entry: {result}")
-                continue
-            if result is None:
-                continue
-            stored_article_ids.append(result["article_id"])
-            if result["mention"] is not None:
-                technology_mentions.append(result["mention"])
+            rich_console = Console()
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(bar_width=40),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                TextColumn("{task.fields[status]}"),
+                console=rich_console,
+                transient=False,
+            ) as progress:
+                task = progress.add_task(
+                    "Processing articles",
+                    total=len(entries),
+                    status="",
+                )
+                completed_count = 0
+                tech_count = 0
+                non_tech_count = 0
+
+                async def _run_with_progress(idx, entry):
+                    nonlocal completed_count, tech_count, non_tech_count
+
+                    def on_progress(i, total, msg):
+                        progress.update(task, status=f"  [{i}/{total}] {msg[:50]}")
+
+                    result = await self._process_single_entry(
+                        entry,
+                        idx,
+                        len(entries),
+                        cutoff_date,
+                        semaphore,
+                        progress_callback=on_progress,
+                    )
+                    completed_count += 1
+                    if result is not None:
+                        stored_article_ids.append(result["article_id"])
+                        if result["mention"] is not None:
+                            technology_mentions.append(result["mention"])
+                            tech_count += 1
+                        else:
+                            non_tech_count += 1
+                    progress.advance(task, advance=1)
+                    progress.update(
+                        task,
+                        status=f"  {tech_count} tech, {non_tech_count} non-tech",
+                    )
+                    return result
+
+                results_raw = await asyncio.gather(
+                    *[
+                        _run_with_progress(idx, entry)
+                        for idx, entry in enumerate(entries, 1)
+                    ],
+                    return_exceptions=True,
+                )
+
+                results = [
+                    r if not isinstance(r, Exception) else r for r in results_raw
+                ]
+
+            # Print grouped results after progress bar completes
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing entry: {result}")
+                    continue
+                if result is None:
+                    continue
+                if result.get("log"):
+                    for line in result["log"]:
+                        print(line)
+
+            print(
+                f"  ✓ Processed {len(entries)} articles: "
+                f"{tech_count} tech, {non_tech_count} non-tech"
+            )
+        else:
+            coroutines = [
+                self._process_single_entry(
+                    entry, idx, len(entries), cutoff_date, semaphore
+                )
+                for idx, entry in enumerate(entries, 1)
+            ]
+            results = await asyncio.gather(*coroutines, return_exceptions=True)
+
+            tech_count = 0
+            non_tech_count = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing entry: {result}")
+                    continue
+                if result is None:
+                    continue
+                stored_article_ids.append(result["article_id"])
+                if result["mention"] is not None:
+                    technology_mentions.append(result["mention"])
+                    tech_count += 1
+                else:
+                    non_tech_count += 1
 
         technology_mentions.sort(
             key=lambda x: (x.relevance_score, x.published_date), reverse=True

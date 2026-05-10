@@ -17,9 +17,9 @@ def analyze(
     verbose: bool = typer.Option(True, "--verbose", "-v", help="Show detailed output"),
 ):
     """Run a complete tech news analysis cycle"""
-    
+
     async def run():
-        system = TechNewsMultiAgentSystem()
+        system = TechNewsMultiAgentSystem(verbose=verbose)
         results = await system.run_analysis(max_age_days=days, verbose=verbose)
         if verbose:
             system.display_results(results)
@@ -34,7 +34,7 @@ def search(
     limit: int = typer.Option(10, "--limit", "-l", help="Maximum results to show"),
 ):
     """Search for technologies in the memory"""
-    
+
     async def run():
         system = TechNewsMultiAgentSystem()
         await system.search_technologies(query, limit=limit)
@@ -47,7 +47,7 @@ def details(
     tech_name: str = typer.Argument(..., help="Name of the technology"),
 ):
     """Get detailed information about a specific technology"""
-    
+
     async def run():
         system = TechNewsMultiAgentSystem()
         await system.get_technology_details(tech_name)
@@ -58,7 +58,7 @@ def details(
 @app.command()
 def summary():
     """Generate a summary report of all tracked technologies"""
-    
+
     async def run():
         system = TechNewsMultiAgentSystem()
         report = await system.generate_summary_report()
@@ -72,17 +72,17 @@ def track(
     tech_name: str = typer.Argument(..., help="Name of the technology to track"),
 ):
     """Get development timeline for a specific technology"""
-    
+
     async def run():
         system = TechNewsMultiAgentSystem()
-        
+
         all_techs = await system.get_all_technologies()
         tech_id = None
         for tech in all_techs:
             if tech["name"].lower() == tech_name.lower():
                 tech_id = tech["id"]
                 break
-        
+
         if tech_id:
             await system.dev_tracker.get_technology_timeline(tech_id)
         else:
@@ -93,21 +93,27 @@ def track(
 
 @app.command()
 def list(
-    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
+    category: Optional[str] = typer.Option(
+        None, "--category", "-c", help="Filter by category"
+    ),
 ):
     """List all tracked technologies"""
-    
+
     async def run():
         system = TechNewsMultiAgentSystem()
         all_techs = await system.get_all_technologies()
-        
+
         if category:
-            all_techs = [t for t in all_techs if t.get("category", "").lower() == category.lower()]
-        
+            all_techs = [
+                t
+                for t in all_techs
+                if t.get("category", "").lower() == category.lower()
+            ]
+
         from rich.console import Console
         from rich.table import Table
         from rich import box
-        
+
         console = Console()
         table = Table(show_header=True, header_style="bold magenta", box=box.ROUNDED)
         table.add_column("Name", style="cyan")
@@ -116,7 +122,7 @@ def list(
         table.add_column("Trend", style="yellow")
         table.add_column("Confidence", justify="right")
         table.add_column("Hype", justify="right")
-        
+
         for tech in all_techs:
             table.add_row(
                 tech.get("name", "N/A"),
