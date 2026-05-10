@@ -41,12 +41,18 @@ async def fetch_feed(
     """
     entries = []
     is_36kr_feed = "36kr" in url.lower()
+    is_cnmo_feed = "cnmo" in url.lower()
 
     # Create session if not provided
     close_session = False
     if session is None:
+        user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            if is_cnmo_feed
+            else "TechNewsAnalyzer/1.0"
+        )
         session = aiohttp.ClientSession(
-            headers={"User-Agent": "TechNewsAnalyzer/1.0"},
+            headers={"User-Agent": user_agent},
             timeout=aiohttp.ClientTimeout(total=timeout),
         )
         close_session = True
@@ -211,7 +217,9 @@ async def fetch_all_feeds(
     close_session = False
     if session is None:
         session = aiohttp.ClientSession(
-            headers={"User-Agent": "TechNewsAnalyzer/1.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
             timeout=aiohttp.ClientTimeout(total=timeout),
         )
         close_session = True

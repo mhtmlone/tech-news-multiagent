@@ -1,0 +1,9 @@
+{
+    "sources": [
+        {
+            "url": "https://thenextweb.com/feed/",
+            "name": "The Next Web",
+            "category": "tech_news"
+        }
+    ]
+}

@@ -31,16 +31,16 @@
       "category": "tech_news"
     },
     {
-      "url": "https://thenextweb.com/feed/",
-      "name": "The Next Web",
-      "category": "tech_news"
-    },
-    {
       "url": "https://rsshub.rssforever.com/36kr/newsflashes",
       "name": "36kr",
       "category": "tech_news",
       "original_url": "https://36kr.com/feed",
       "note": "Using RSSHub proxy because 36kr.com/feed is protected by CAPTCHA"
+    },
+    {
+      "url": "https://www.cnmo.com/rss/doc.xml",
+      "name": "CNMO",
+      "category": "tech_news"
     }
   ]
 }
